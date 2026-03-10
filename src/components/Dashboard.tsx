@@ -62,7 +62,7 @@ export function Dashboard() {
               {weather.map((day, index) => (
                 <div
                   key={index}
-                  className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-lg flex flex-col items-center"
+                  className="text-center p-4 bg-slate-100 dark:bg-slate-800 rounded-lg flex flex-col items-center"
                 >
                   <p className="font-medium text-slate-900 dark:text-slate-100 uppercase text-xs">
                     {day.date.toLocaleDateString("en-EN", { weekday: "short" })}
