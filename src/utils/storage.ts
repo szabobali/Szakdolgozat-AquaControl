@@ -1,11 +1,10 @@
-import type { WateringZone} from "../types";
+import type { WateringZone } from "../types";
 
 const STORAGE_KEYS = {
   ZONES: "watering_zones",
 };
 
 export const storage = {
-  //zones
   getZones(): WateringZone[] {
     const data = localStorage.getItem(STORAGE_KEYS.ZONES);
     if (!data) {
@@ -18,6 +17,7 @@ export const storage = {
       this.saveZones(defaultZones);
       return defaultZones;
     }
+    
     return JSON.parse(data, (key, value) => {
       if (key === "lastWatered" && value) return new Date(value);
       return value;
@@ -26,5 +26,21 @@ export const storage = {
 
   saveZones(zones: WateringZone[]) {
     localStorage.setItem(STORAGE_KEYS.ZONES, JSON.stringify(zones));
-  },  
+  },
+  
+  updateZone(zoneId: string, start: boolean) {
+    const zones = this.getZones();
+    
+    const updatedZones = zones.map(zone => {
+      if (zone.id === zoneId) {
+        return {
+          ...zone,
+          isActive: start,
+          lastWatered: start ? new Date() : zone.lastWatered
+        };
+      }
+      return zone;
+    });
+    this.saveZones(updatedZones);
+  }
 };

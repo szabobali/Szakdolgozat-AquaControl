@@ -1,25 +1,30 @@
 import { useState, useEffect } from "react";
-import {
-  Play,
-  Square,
-  Droplets,
-  Cloud,
-  ThermometerSun,
-  CloudRain,
-  Gauge,
-} from "lucide-react";
+import { Play, Square, Droplets, CloudRain } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { storage } from "../utils/storage";
-import type { WateringZone, WeatherData } from "../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { fetchWeather, getWeatherMetadata } from "../utils/weather";
-import type {WeatherForecastDay} from "../utils/weather"
+
+import { storage } from "../utils/storage";
+import { fetchWeather } from "../utils/weather";
+import type { WateringZone } from "../types";
+import type { WeatherForecastDay } from "../utils/weather";
 
 export function Dashboard() {
   const [zones, setZones] = useState<WateringZone[]>([]);
   const [weather, setWeather] = useState<WeatherForecastDay[]>([]);
-  const [waterUsageToday, setWaterUsageToday] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  const loadData = async () => {
+    try {
+      setZones(storage.getZones());
+      const weatherData = await fetchWeather();
+      setWeather(weatherData);
+    } catch (error) {
+      console.error("Data synchronization failed:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -27,21 +32,25 @@ export function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const loadData = async () => {
-    try {
-      const weatherdata = await fetchWeather();
-      setWeather(weatherdata);
-    } catch (err) {
-      console.error("Failed to fetch weather", err);
-    }
+  const handleStartWatering = (zoneId: string) => {
+    storage.updateZone(zoneId, true);
+    setZones(storage.getZones());
   };
 
-  const handleStartWatering = async () => {};
+  const handleStopWatering = (zoneId: string) => {
+    storage.updateZone(zoneId, false);
+    setZones(storage.getZones());
+  };
 
-  const handleStopWatering = async () => {};
-
+  if (loading)
     return (
-    <div className="space-y-6 p-6">
+      <div className="p-8 text-center">
+        Synchronizing with weather stations...
+      </div>
+    );
+
+  return (
+    <div className="p-6 space-y-6">
       {/* 5-Day Forecast Szekció */}
       {weather.length > 0 && (
         <Card>
@@ -51,24 +60,29 @@ export function Dashboard() {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               {weather.map((day, index) => (
-                <div key={index} className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-lg flex flex-col items-center">
-                  <p className="font-medium text-slate-900 dark:text-slate-100">
-                    {day.date.toLocaleDateString('en-US', { weekday: 'short' })}
+                <div
+                  key={index}
+                  className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-lg flex flex-col items-center"
+                >
+                  <p className="font-medium text-slate-900 dark:text-slate-100 uppercase text-xs">
+                    {day.date.toLocaleDateString("en-EN", { weekday: "short" })}
                   </p>
+
                   <div className="my-3">
                     <day.icon className="w-8 h-8 text-blue-500" />
                   </div>
-                  
-                  <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+
+                  <p className="text-lg font-bold text-slate-900 dark:text-slate-100">
                     {day.tempMax}/{day.tempMin}°C
                   </p>
-                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 uppercase tracking-wider">
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 uppercase tracking-tighter leading-none">
                     {day.label}
                   </p>
-                  
+
                   {day.rainSum > 0 && (
-                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-2 flex items-center gap-1">
-                      <Droplets className="w-3 h-3" /> {day.rainSum.toFixed(1)}mm
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-2 flex items-center gap-1 font-medium">
+                      <Droplets className="w-3 h-3" /> {day.rainSum.toFixed(1)}
+                      mm
                     </p>
                   )}
                 </div>
@@ -96,26 +110,41 @@ export function Dashboard() {
                       <Droplets className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-slate-900 dark:text-slate-100">{zone.name}</h3>
+                      <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+                        {zone.name}
+                      </h3>
                       {zone.lastWatered && (
                         <p className="text-xs text-slate-500">
-                          Last: {new Date(zone.lastWatered).toLocaleString('hu-HU')}
+                          Last:{" "}
+                          {new Date(zone.lastWatered).toLocaleString("hu-HU")}
                         </p>
                       )}
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center gap-2">
-                    {zone.isActive && <Badge className="bg-green-600 animate-pulse">Active</Badge>}
+                    {zone.isActive && (
+                      <Badge className="bg-green-600 animate-pulse">
+                        Active
+                      </Badge>
+                    )}
                     <Button
                       size="sm"
                       variant={zone.isActive ? "destructive" : "default"}
-                      onClick={() => zone.isActive ? handleStopWatering() : handleStartWatering()}
+                      onClick={() =>
+                        zone.isActive
+                          ? handleStopWatering(zone.id)
+                          : handleStartWatering(zone.id)
+                      }
                     >
                       {zone.isActive ? (
-                        <><Square className="w-4 h-4 mr-1" /> Stop</>
+                        <>
+                          <Square className="w-4 h-4 mr-1" /> Stop
+                        </>
                       ) : (
-                        <><Play className="w-4 h-4 mr-1" /> Start</>
+                        <>
+                          <Play className="w-4 h-4 mr-1" /> Start
+                        </>
                       )}
                     </Button>
                   </div>
@@ -124,11 +153,15 @@ export function Dashboard() {
                 <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800 mt-2">
                   <div className="text-sm">
                     <span className="text-slate-500">Duration:</span>
-                    <span className="ml-2 font-mono font-medium">{zone.duration} min</span>
+                    <span className="ml-2 font-mono font-medium text-slate-500">
+                      {zone.duration} min
+                    </span>
                   </div>
                   <div className="text-sm">
                     <span className="text-slate-500">Flow:</span>
-                    <span className="ml-2 font-mono font-medium">{zone.flowRate} L/min</span>
+                    <span className="ml-2 font-mono font-medium text-slate-500">
+                      {zone.flowRate} L/min
+                    </span>
                   </div>
                 </div>
               </div>
