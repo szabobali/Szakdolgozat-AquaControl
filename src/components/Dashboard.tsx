@@ -1,5 +1,13 @@
 import { useState, useEffect } from "react";
-import { Play, Square, Droplets, CloudRain } from "lucide-react";
+import {
+  Play,
+  Square,
+  Droplets,
+  CloudRain,
+  Cloud,
+  Gauge,
+  ThermometerSun,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -51,6 +59,77 @@ export function Dashboard() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Weather Overview */}
+      {weather && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    Temperature
+                  </p>
+                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                    23°C
+                  </p>{" "}
+                  {/*from sensor*/}
+                </div>
+                <ThermometerSun className="w-8 h-8 text-orange-500" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    Humidity
+                  </p>
+                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                    65%
+                  </p>{" "}
+                  {/*from sensor*/}
+                </div>
+                <Droplets className="w-8 h-8 text-blue-500" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    Water Usage
+                  </p>
+                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                    12.5L
+                  </p>{" "}
+                  {/*from calculation*/}
+                </div>
+                <Gauge className="w-8 h-8 text-cyan-500" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    Status
+                  </p>
+                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                    {zones.some((z) => z.isActive) ? "Active" : "Idle"}
+                  </p>
+                </div>
+                <Cloud className="w-8 h-8 text-sky-500" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
       {/* 5-Day Forecast Szekció */}
       {weather.length > 0 && (
         <Card>
