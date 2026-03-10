@@ -9,9 +9,11 @@ import {
 import { Outlet, Link, useLocation } from "react-router";
 import { Toaster } from "../ui/sonner";
 import { Button } from "../ui/button";
+import { useTheme } from "./ThemeProvider";
 
 function Root() {
   const location = useLocation();
+  const { theme, toggleTheme } = useTheme();
   const navItems = [
     { path: "/", label: "Dashboard", icon: Droplets },
     { path: "/schedule", label: "Schedule", icon: Calendar },
@@ -36,8 +38,17 @@ function Root() {
                 </p>
               </div>
             </div>
-            <Button className="text-slate-600 dark:text-slate-400">
-              <Sun className="w-5 h-5" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleTheme}
+              className="text-slate-600 dark:text-slate-400"
+            >
+              {theme === "light" ? (
+                <Moon className="w-5 h-5" />
+              ) : (
+                <Sun className="w-5 h-5" />
+              )}
             </Button>
           </div>
         </div>
