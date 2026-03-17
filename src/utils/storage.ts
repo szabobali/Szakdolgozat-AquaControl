@@ -1,7 +1,8 @@
-import type { WateringZone } from "../types";
+import type { WateringZone, ScheduleEntry} from "../types";
 
 const STORAGE_KEYS = {
   ZONES: "watering_zones",
+  SCHEDULES: "watering_schedules",
 };
 
 export const storage = {
@@ -42,5 +43,23 @@ export const storage = {
       return zone;
     });
     this.saveZones(updatedZones);
-  }
+  },
+
+  getSchedules(): ScheduleEntry[] {
+    const data = localStorage.getItem(STORAGE_KEYS.SCHEDULES);
+    if (!data) {
+      const defaultSchedules: ScheduleEntry[] = [
+        { id: "1", zoneId: "1", time: "06:00", duration: 15, days: [1, 3, 5], enabled: true },
+        { id: "2", zoneId: "2", time: "06:15", duration: 20, days: [1, 3, 5], enabled: true },
+        { id: "3", zoneId: "3", time: "07:00", duration: 10, days: [0, 2, 4, 6], enabled: true },
+      ];
+      this.saveSchedules(defaultSchedules);
+      return defaultSchedules;
+    }
+    return JSON.parse(data);
+  },
+  saveSchedules(schedules: ScheduleEntry[]) {
+    localStorage.setItem(STORAGE_KEYS.SCHEDULES, JSON.stringify(schedules));
+  },
+
 };
