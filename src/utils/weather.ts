@@ -60,11 +60,6 @@ const params = {
 	forecast_days: 4,
 };
 
-const url = "https://api.open-meteo.com/v1/forecast";
-const responses = await fetchWeatherApi(url, params);
-const response = responses[0];
-const daily = response.daily()!;
-
 const DEFAULT_METADATA: WeatherMetadata = {
   label: 'Unknown',
   icon: HelpCircle
