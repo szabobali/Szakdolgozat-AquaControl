@@ -1,8 +1,9 @@
-import type { WateringZone, ScheduleEntry} from "../types";
+import type { WateringZone, ScheduleEntry, WateringHistory} from "../types";
 
 const STORAGE_KEYS = {
   ZONES: "watering_zones",
   SCHEDULES: "watering_schedules",
+  HISTORY: "waterint_history",
 };
 
 export const storage = {
@@ -58,8 +59,41 @@ export const storage = {
     }
     return JSON.parse(data);
   },
+
   saveSchedules(schedules: ScheduleEntry[]) {
     localStorage.setItem(STORAGE_KEYS.SCHEDULES, JSON.stringify(schedules));
+  },
+
+getHistory(): WateringHistory[] {
+    const data = localStorage.getItem(STORAGE_KEYS.HISTORY);
+    if (!data) {
+      const now = new Date();
+      const defaultHistory: WateringHistory[] = [
+        { id: "1", zoneId: "1", zoneName: "Front Lawn", startTime: new Date(now.getTime() - 2 * 60 * 60 * 1000), duration: 15, type: "scheduled", waterUsed: 75 },
+        { id: "2", zoneId: "2", zoneName: "Back Garden", startTime: new Date(now.getTime() - 3 * 60 * 60 * 1000), duration: 20, type: "scheduled", waterUsed: 90 },
+        { id: "3", zoneId: "3", zoneName: "Vegetable Patch", startTime: new Date(now.getTime() - 24 * 60 * 60 * 1000), duration: 10, type: "auto", waterUsed: 30 },
+      ];
+      this.saveHistory(defaultHistory);
+      return defaultHistory;
+    }
+    return JSON.parse(data, (key, value) => {
+      if (key === "startTime") return new Date(value);
+      return value;
+    });
+  },
+
+  saveHistory(history: WateringHistory[]) {
+    localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+  },
+
+  addHistory(entry: WateringHistory) {
+    const history = this.getHistory();
+    history.unshift(entry);
+    // Keep only last 100 entries
+    if (history.length > 100) {
+      history.splice(100);
+    }
+    this.saveHistory(history);
   },
 
 };
