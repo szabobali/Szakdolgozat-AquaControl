@@ -3,7 +3,6 @@ import {
   Play,
   Square,
   Droplets,
-  CloudRain,
   Cloud,
   Gauge,
   ThermometerSun,

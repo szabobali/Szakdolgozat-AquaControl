@@ -51,15 +51,6 @@ const WMO_METADATA: Record<number, WeatherMetadata> = {
   99: { label: 'Thunderstorm with heavy hail', icon: CloudLightning },
 };
 
-const params = {
-	latitude: 47.35333,
-	longitude: 18.27312,
-	daily: ["temperature_2m_max", "temperature_2m_min", "weather_code", "rain_sum"],
-	timezone: "auto",
-	past_days: 1,
-	forecast_days: 4,
-};
-
 const DEFAULT_METADATA: WeatherMetadata = {
   label: 'Unknown',
   icon: HelpCircle
