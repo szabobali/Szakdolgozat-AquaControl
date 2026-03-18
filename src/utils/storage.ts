@@ -1,9 +1,10 @@
-import type { WateringZone, ScheduleEntry, WateringHistory} from "../types";
+import type { WateringZone, ScheduleEntry, WateringHistory, SystemSettings} from "../types";
 
 const STORAGE_KEYS = {
   ZONES: "watering_zones",
   SCHEDULES: "watering_schedules",
   HISTORY: "waterint_history",
+  SETTINGS: "system_settings",
 };
 
 export const storage = {
@@ -96,4 +97,25 @@ getHistory(): WateringHistory[] {
     this.saveHistory(history);
   },
 
+  getSettings(): SystemSettings {
+    const data = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+    if (!data) {
+      const defaultSettings: SystemSettings = {
+        autoWatering: true,
+        moistureThreshold: 40,
+        rainDelay: true,
+        rainThreshold: 5,
+        notifications: true,
+        flowSensorEnabled: true,
+        defaultFlowRate: 5,
+      };
+      this.saveSettings(defaultSettings);
+      return defaultSettings;
+    }
+    return JSON.parse(data);
+  },
+
+  saveSettings(settings: SystemSettings) {
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  },
 };
