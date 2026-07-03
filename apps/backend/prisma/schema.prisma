@@ -1,0 +1,63 @@
+// STREAMING_CHUNK: Konfiguráljuk a Prisma kliens generátort és az SQLite adatbázist...
+generator client {
+provider = "prisma-client-js"
+}
+
+datasource db {
+provider = "sqlite" // Raspberry Pi-on tökéletes, egyetlen fájlban tárolja az adatokat
+url      = "file:./dev.db"
+}
+
+// STREAMING_CHUNK: Definiáljuk a Zóna modellt a kapufeltételekkel...
+model Zone {
+id                 Int        @id @default(autoincrement())
+name               String
+mqtt_topic_cmd     String     @unique // Ide küldjük a parancsot: "garden/valves/1/cmd"
+mqtt_topic_status  String     @unique // Innen várjuk a választ: "garden/valves/1/status"
+is_active          Boolean    @default(true)
+
+// Kapufeltételek
+moisture_threshold Int?       // pl. 60(%) - Ha e felett van, nem locsol
+ignore_rain        Boolean    @default(false)
+default_duration   Int        @default(15) // Alapértelmezett locsolási idő percekben
+
+schedules          Schedule[]
+history            History[]
+}
+
+// STREAMING_CHUNK: Definiáljuk az Ütemező modellt...
+model Schedule {
+id             Int      @id @default(autoincrement())
+zone_id        Int
+zone           Zone     @relation(fields: [zone_id], references: [id])
+
+time_of_day    String   // "HH:MM" formátum
+duration_mins  Int
+
+// Mely napokon legyen aktív? (Bitmask helyett külön oszlopok a könnyebb lekérdezésért)
+day_sunday     Boolean  @default(false)
+day_monday     Boolean  @default(false)
+day_tuesday    Boolean  @default(false)
+day_wednesday  Boolean  @default(false)
+day_thursday   Boolean  @default(false)
+day_friday     Boolean  @default(false)
+day_saturday   Boolean  @default(false)
+
+is_enabled     Boolean  @default(true)
+}
+
+// STREAMING_CHUNK: Definiáljuk a History (Eseménynapló) modellt...
+model History {
+id             Int      @id @default(autoincrement())
+zone_id        Int
+zone           Zone     @relation(fields: [zone_id], references: [id])
+
+start_time     DateTime @default(now())
+end_time       DateTime?
+
+// Mivel SQLite-ot használunk, String-et használunk Enum helyett
+trigger_source String   // Értékek: "MANUAL", "SCHEDULED", "SMART_OVERRIDE"
+status         String   // Értékek: "IN_PROGRESS", "COMPLETED", "FAILED", "INTERRUPTED"
+
+water_used_l   Float?   // Becsült vagy mért vízhasználat literben
+}
