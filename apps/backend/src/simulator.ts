@@ -7,7 +7,7 @@ async function start() {
     console.log('🤖 [Simulator] Broker inicializálása...');
     const aedes = await Aedes.createBroker();
     
-     const PORT = 1884;
+     const PORT = 1883;
     const server = createServer(aedes.handle);
 
     server.listen(PORT, () => {

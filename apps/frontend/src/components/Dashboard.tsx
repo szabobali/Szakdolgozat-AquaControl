@@ -44,73 +44,79 @@ export function Dashboard() {
 
   useEffect(() => {
     loadData();
-
-    // 1. Feliratkozunk az Express szerverünk SSE streamjére
+    console.log("[Frontend] SSE kapcsolat inicializálása a rendszerállapothoz...");
     const eventSource = new EventSource('/api/stream/system-status');
 
-    // 2. Eseménykezelő, ami figyeli a bejövő MQTT nyugtázásokat a backendtől
+    eventSource.onopen = () => {
+      console.log("🟢 [Frontend] Real-time SSE adatfolyam sikeresen megnyitva");
+    };
+
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log("🟢 SSE üzenet érkezett:", data); // Debug
-        
+        console.log("📩 [Frontend] SSE aszinkron állapotcsomag érkezett:", data);
+
+        // Ha a kapott esemény típusa zónaváltozás, leképezzük a lokális reaktív tömbre
         if (data.type === 'ZONE_STATUS_CHANGE') {
-           setZones(prevZones => 
-             prevZones.map(zone => 
-               zone.id.toString() === data.zoneId.toString() 
-                 ? { ...zone, isActive: data.isActive } 
-                 : zone
-             )
-           );
+          setZones((prevZones) =>
+            prevZones.map((zone) =>
+              zone.id === data.zoneId.toString()
+                ? { ...zone, isActive: data.isActive }
+                : zone
+            )
+          );
         }
       } catch (err) {
-        console.error("Failed to parse SSE message:", err);
+        console.error("[Frontend] Kritikus hiba az SSE payload parsolása közben:", err);
       }
     };
 
-    eventSource.onerror = (error) => {
-      console.error("🔴 SSE Connection lost", error);
+    eventSource.onerror = (err) => {
+      console.error("🔴 [Frontend] SSE adatfolyam megszakadt vagy hálózati hiba lépett fel:", err);
     };
 
-    // 3. Cleanup: Ha elnavigálunk a Dashboardról, lezárjuk a hálózati kapcsolatot
     return () => {
+      console.log("[Frontend] Tisztítási mechanizmus: SSE kapcsolat lezárása");
       eventSource.close();
     };
-  }, []);
+  }, []); // Üres függőségi tömb: csak komponens mountoláskor fut le egyszer
 
   const handleStartWatering = async (zoneId: string, durationMinutes: number = 15) => {
     try {
-        const response = await fetch(`/api/zones/${zoneId}/start`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ duration: durationMinutes })
-        });
+      console.log(`[Frontend] Öntözés indítása: Zóna ${zoneId}, ${durationMinutes} perc`);
+      const response = await fetch(`/api/zones/${zoneId}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration: durationMinutes })
+      });
 
-        // 1. NE parsoljuk rögtön, olvassuk ki szövegként
-        const rawText = await response.text();
-        console.log("[Frontend] A szerver nyers válasza:", rawText);
-
-        if (!response.ok) {
-            throw new Error(`Szerver hiba (${response.status}): ${rawText}`);
-        }
-
-        // 2. Csak akkor parsoljuk, ha biztosan nem üres
-        const data = rawText ? JSON.parse(rawText) : {};
-        
-        toast.success("Parancs elküldve a vezérlőnek");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to start watering");
+      }
+      toast.success("Indítási parancs elküldve a backendnek");
     } catch (error: any) {
-        console.error("[Frontend] Hiba a válasz feldolgozásakor:", error);
-        toast.error("Hiba: " + error.message);
+      console.error("[Frontend] Hiba az indítási parancs küldésekor:", error);
+      toast.error(error.message);
     }
-};
+  };
 
   const handleStopWatering = async (zoneId: string) => {
     try {
-       const response = await fetch(`/api/zones/${zoneId}/stop`, { method: 'POST' });
-       if (!response.ok) throw new Error("Failed to stop watering");
-       toast.info("Leállítási parancs kiküldve");
+      console.log(`[Frontend] Öntözés leállítása: Zóna ${zoneId}`);
+      const response = await fetch(`/api/zones/${zoneId}/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to stop watering");
+      }
+      toast.success("Leállítási parancs elküldve a backendnek");
     } catch (error: any) {
-       toast.error(error.message);
+      console.error("[Frontend] Hiba a leállítási parancs küldésekor:", error);
+      toast.error(error.message);
     }
   };
 
