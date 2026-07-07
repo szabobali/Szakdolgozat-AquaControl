@@ -14,11 +14,14 @@ async function buildTopicCache() {
   
   topicToZoneIdMap = {};
   zones.forEach(z => {
-    if (z.mqtt_topic_status) {
-      topicToZoneIdMap[z.mqtt_topic_status] = z.id;
-    }
+    // Ha van az adatbázisban fix topic, azt használjuk. 
+    // Ha nincs, generáljuk le az alapértelmezett konvenció alapján!
+    const statusTopic = z.mqtt_topic_status || `garden/valves/${z.id}/status`;
+    topicToZoneIdMap[statusTopic] = z.id;
   });
-  console.log('[Backend] MQTT Topic Cache felépítve az I/O minimalizálása érdekében.');
+  
+  // Debug log, hogy lásd, mik kerültek be a memóriába:
+  console.log('[Backend] MQTT Topic Cache felépítve:', topicToZoneIdMap);
 }
 
 // Prisma
@@ -200,31 +203,45 @@ mqttClient.on('offline', () => {
 // MQTT üzenetek feldolgozása (status topic)
 mqttClient.on('message', async (topic, message) => {
   try {
-    // O(1) sebességű keresés a memóriában, string split és DB lekérdezés nélkül
+    // O(1) sebességű keresés a memóriában
     const zoneId = topicToZoneIdMap[topic];
     
     if (zoneId === undefined) {
-      // Nem regisztrált topic
+      // Nem regisztrált topic, ignoráljuk
       return; 
     }
 
-    const data = JSON.parse(message.toString());
+    const payload = message.toString();
+    let data: any = null;
+    try { data = JSON.parse(payload); } catch (e) { return; }
+
     console.log(`📩 [Backend] MQTT üzenet feldolgozása (Zóna: ${zoneId}):`, data);
 
-    const stopped = data && (data.event === 'STOPPED' || data.isActive === false || data.state === 'OFF');
-    const currentStatus = !stopped;
+    // 1. Állapot biztonságos kinyerése (támogatja a state: OFF és az isActive: false formátumot is)
+    let isCurrentlyActive = false;
+    if (typeof data.isActive === 'boolean') {
+      isCurrentlyActive = data.isActive;
+    } else if (data.state === 'ON') {
+      isCurrentlyActive = true;
+    } else if (data.state === 'OFF') {
+      isCurrentlyActive = false;
+    }
 
-    // KÖZVETLEN HARDVER VISSZAJELZÉS ALAPJÁN FRISSÍTJÜK A DB-T, HA KÍVÜLRŐL JÖTT A LEÁLLÁS (pl. időzítő lefutott a szimulátorban)
+    // 2. KÖZVETLEN HARDVER VISSZAJELZÉS ALAPJÁN FRISSÍTJÜK A DB-T
     await prisma.zone.update({
       where: { id: zoneId },
-      data: { is_active: currentStatus }
+      data: { is_active: isCurrentlyActive }
     });
 
+    // 3. Ha leállt (bármilyen okból), lezárjuk a történetet
+    const stopped = (data.event === 'STOPPED' || isCurrentlyActive === false);
+    
     if (stopped) {
       const hist = await prisma.history.findFirst({
         where: { zone_id: zoneId, status: 'IN_PROGRESS' },
         orderBy: { start_time: 'desc' }
       });
+      
       if (hist) {
         await prisma.history.update({
           where: { id: hist.id },
@@ -234,12 +251,14 @@ mqttClient.on('message', async (topic, message) => {
             water_used_l: data?.waterUsedL ?? undefined
           }
         });
+        console.log(`[Backend] Öntözési történet lezárva (Zóna: ${zoneId})`);
       }
     }
 
-    // Továbbküldés az SSE klienseknek
-    const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: currentStatus };
+    // 4. Továbbküldés az SSE klienseknek
+    const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: isCurrentlyActive };
     sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
+    
   } catch (err) {
     console.error('[Backend] MQTT message handling error:', err);
   }
