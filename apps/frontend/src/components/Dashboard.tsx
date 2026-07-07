@@ -11,23 +11,32 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 
-import { storage } from "../utils/storage";
 import { fetchWeather } from "../utils/weather";
 import type { WateringZone } from "../types";
-import type { WeatherForecastDay } from "../utils/weather";
+import { toast } from "sonner";
 
 export function Dashboard() {
   const [zones, setZones] = useState<WateringZone[]>([]);
-  const [weather, setWeather] = useState<WeatherForecastDay[]>([]);
+  const [weather, setWeather] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
     try {
-      setZones(storage.getZones());
+      // 1. Zónák lekérése a valódi Node.js backendből
+      const res = await fetch('/api/zones');
+      if (res.ok) {
+        const data = await res.json();
+        setZones(data);
+      } else {
+        throw new Error("Backend nem válaszol");
+      }
+      
+      // 2. Időjárás lekérése
       const weatherData = await fetchWeather();
       setWeather(weatherData);
     } catch (error) {
-      console.error("Data synchronization failed:", error);
+      console.error("Adatszinkronizációs hiba:", error);
+      toast.error("Nem sikerült betölteni a kezdeti adatokat. Ellenőrizd a backendet!");
     } finally {
       setLoading(false);
     }
@@ -35,90 +44,126 @@ export function Dashboard() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 600000);
-    return () => clearInterval(interval);
+
+    // 1. Feliratkozunk az Express szerverünk SSE streamjére
+    const eventSource = new EventSource('/api/stream/system-status');
+
+    // 2. Eseménykezelő, ami figyeli a bejövő MQTT nyugtázásokat a backendtől
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("🟢 SSE üzenet érkezett:", data); // Debug
+        
+        if (data.type === 'ZONE_STATUS_CHANGE') {
+           setZones(prevZones => 
+             prevZones.map(zone => 
+               zone.id.toString() === data.zoneId.toString() 
+                 ? { ...zone, isActive: data.isActive } 
+                 : zone
+             )
+           );
+        }
+      } catch (err) {
+        console.error("Failed to parse SSE message:", err);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error("🔴 SSE Connection lost", error);
+    };
+
+    // 3. Cleanup: Ha elnavigálunk a Dashboardról, lezárjuk a hálózati kapcsolatot
+    return () => {
+      eventSource.close();
+    };
   }, []);
 
-  const handleStartWatering = (zoneId: string) => {
-    storage.updateZone(zoneId, true);
-    setZones(storage.getZones());
-  };
+  const handleStartWatering = async (zoneId: string, durationMinutes: number = 15) => {
+    try {
+        const response = await fetch(`/api/zones/${zoneId}/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ duration: durationMinutes })
+        });
 
-  const handleStopWatering = (zoneId: string) => {
-    storage.updateZone(zoneId, false);
-    setZones(storage.getZones());
+        // 1. NE parsoljuk rögtön, olvassuk ki szövegként
+        const rawText = await response.text();
+        console.log("[Frontend] A szerver nyers válasza:", rawText);
+
+        if (!response.ok) {
+            throw new Error(`Szerver hiba (${response.status}): ${rawText}`);
+        }
+
+        // 2. Csak akkor parsoljuk, ha biztosan nem üres
+        const data = rawText ? JSON.parse(rawText) : {};
+        
+        toast.success("Parancs elküldve a vezérlőnek");
+    } catch (error: any) {
+        console.error("[Frontend] Hiba a válasz feldolgozásakor:", error);
+        toast.error("Hiba: " + error.message);
+    }
+};
+
+  const handleStopWatering = async (zoneId: string) => {
+    try {
+       const response = await fetch(`/api/zones/${zoneId}/stop`, { method: 'POST' });
+       if (!response.ok) throw new Error("Failed to stop watering");
+       toast.info("Leállítási parancs kiküldve");
+    } catch (error: any) {
+       toast.error(error.message);
+    }
   };
 
   if (loading)
     return (
       <div className="p-8 text-center">
-        Synchronizing with weather stations...
+        Szinkronizálás a vezérlővel és az időjárás-állomásokkal...
       </div>
     );
 
   return (
     <div className="p-6 space-y-6">
       {/* Weather Overview */}
-      {weather && (
+      {weather && weather.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Temperature
-                  </p>
-                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                    23°C
-                  </p>{" "}
-                  {/*from sensor*/}
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Temperature</p>
+                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">23°C</p>
                 </div>
                 <ThermometerSun className="w-8 h-8 text-orange-500" />
               </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Humidity
-                  </p>
-                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                    65%
-                  </p>{" "}
-                  {/*from sensor*/}
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Humidity</p>
+                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">65%</p>
                 </div>
                 <Droplets className="w-8 h-8 text-blue-500" />
               </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Water Usage
-                  </p>
-                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                    12.5L
-                  </p>{" "}
-                  {/*from calculation*/}
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Water Usage</p>
+                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">12.5L</p>
                 </div>
                 <Gauge className="w-8 h-8 text-cyan-500" />
               </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Status
-                  </p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Status</p>
                   <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
                     {zones.some((z) => z.isActive) ? "Active" : "Idle"}
                   </p>
@@ -129,6 +174,7 @@ export function Dashboard() {
           </Card>
         </div>
       )}
+
       {/* 5-Day Forecast Szekció */}
       {weather.length > 0 && (
         <Card>
@@ -145,22 +191,18 @@ export function Dashboard() {
                   <p className="font-medium text-slate-900 dark:text-slate-100 uppercase text-xs">
                     {day.date.toLocaleDateString("en-EN", { weekday: "short" })}
                   </p>
-
                   <div className="my-3">
                     <day.icon className="w-8 h-8 text-blue-500" />
                   </div>
-
                   <p className="text-lg font-bold text-slate-900 dark:text-slate-100">
                     {day.tempMax}/{day.tempMin}°C
                   </p>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 uppercase tracking-tighter leading-none">
                     {day.label}
                   </p>
-
                   {day.rainSum > 0 && (
                     <p className="text-xs text-blue-600 dark:text-blue-400 mt-2 flex items-center gap-1 font-medium">
-                      <Droplets className="w-3 h-3" /> {day.rainSum.toFixed(1)}
-                      mm
+                      <Droplets className="w-3 h-3" /> {day.rainSum.toFixed(1)} mm
                     </p>
                   )}
                 </div>
@@ -211,8 +253,8 @@ export function Dashboard() {
                       variant={zone.isActive ? "destructive" : "default"}
                       onClick={() =>
                         zone.isActive
-                          ? handleStopWatering(zone.id)
-                          : handleStartWatering(zone.id)
+                          ? handleStopWatering(zone.id.toString())
+                          : handleStartWatering(zone.id.toString(), zone.duration)
                       }
                     >
                       {zone.isActive ? (
@@ -238,12 +280,17 @@ export function Dashboard() {
                   <div className="text-sm">
                     <span className="text-slate-500">Flow:</span>
                     <span className="ml-2 font-mono font-medium text-slate-500">
-                      {zone.flowRate} L/min
+                      {zone.flowRate || 15} L/min
                     </span>
                   </div>
                 </div>
               </div>
             ))}
+            {zones.length === 0 && (
+              <div className="text-center py-6 text-slate-500">
+                No zones loaded. Húzz fel zónákat az adatbázisban!
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

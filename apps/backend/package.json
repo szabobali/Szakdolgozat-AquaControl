@@ -4,17 +4,22 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node --loader ts-node/esm src/server.ts",
+    "dev": "node --watch --loader ts-node/esm src/server.ts",
+    "sim": "node --watch --loader ts-node/esm src/simulator.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "aedes": "^1.1.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "mqtt": "^5.15.1"
+    "mqtt": "^5.15.1",
+    "net": "^1.0.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
