@@ -2,14 +2,37 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Clock, Droplets, Gauge } from "lucide-react";
-import { storage } from "../utils/storage";
+import { toast } from "sonner";
 import type { WateringHistory } from "../types";
 
 export function History() {
   const [history, setHistory] = useState<WateringHistory[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadHistory = async () => {
+    try {
+      const res = await fetch('/api/history');
+      if (!res.ok) throw new Error("Szerver hiba");
+      
+      const data = await res.json();
+      
+      // KRITIKUS: A JSON stringek visszakonvertálása Date objektummá
+      const parsedData = data.map((item: any) => ({
+        ...item,
+        startTime: new Date(item.startTime) 
+      }));
+
+      setHistory(parsedData);
+    } catch (error) {
+      console.error("[Frontend] Hiba a történet betöltésekor:", error);
+      toast.error("Nem sikerült betölteni a naplót.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    setHistory(storage.getHistory());
+    loadHistory();
   }, []);
 
   const getTypeBadge = (type: string) => {
@@ -26,7 +49,7 @@ export function History() {
   };
 
   const formatDate = (date: Date) => {
-    return new Intl.DateTimeFormat("en-US", {
+    return new Intl.DateTimeFormat("hu-HU", {
       month: "short",
       day: "numeric",
       hour: "2-digit",
@@ -37,7 +60,8 @@ export function History() {
   const groupByDate = (entries: WateringHistory[]) => {
     const groups: { [key: string]: WateringHistory[] } = {};
     entries.forEach((entry) => {
-      const dateKey = entry.startTime.toLocaleDateString();
+      // A magyar formátum szerint csoportosítunk
+      const dateKey = entry.startTime.toLocaleDateString("hu-HU");
       if (!groups[dateKey]) {
         groups[dateKey] = [];
       }
@@ -54,6 +78,10 @@ export function History() {
   const weekWaterUsed = history
     .filter((h) => h.startTime > weekAgo)
     .reduce((sum, h) => sum + (h.waterUsed || 0), 0);
+
+  if (loading) {
+    return <div className="p-8 text-center text-slate-500">Előzmények szinkronizálása...</div>;
+  }
 
   return (
     <div className="space-y-6">

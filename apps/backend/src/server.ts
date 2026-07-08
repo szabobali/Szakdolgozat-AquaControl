@@ -510,3 +510,51 @@ app.delete('/api/schedules/:id', async (req, res) => {
     res.status(500).json({ error: 'Törlés sikertelen' });
   }
 });
+
+// ==========================================
+// TÖRTÉNET (HISTORY) API VÉGPONT
+// ==========================================
+
+// GET /api/history - Eseménynapló lekérése
+app.get('/api/history', async (req, res) => {
+  try {
+    const historyRecords = await prisma.history.findMany({
+      orderBy: { start_time: 'desc' }, // Legfrissebbek elöl
+      take: 100, // Biztonsági limit (Pagination helyett egyelőre)
+      include: {
+        zone: true // SQL JOIN: Hozzárakja a zóna adatait, így meglesz a 'name'
+      }
+    });
+
+    // DTO Leképezés: Prisma Entity -> Frontend formátum
+    const frontendHistory = historyRecords.map(record => {
+      // Időtartam kiszámítása percekben
+      let durationMins = 0;
+      if (record.end_time) {
+        const diffMs = record.end_time.getTime() - record.start_time.getTime();
+        durationMins = Math.round(diffMs / 60000);
+      } else if (record.status === 'IN_PROGRESS') {
+        // Ha épp most is fut, kiszámoljuk az eddig eltelt időt
+        const diffMs = new Date().getTime() - record.start_time.getTime();
+        durationMins = Math.round(diffMs / 60000);
+      }
+
+      return {
+        id: record.id.toString(),
+        zoneName: record.zone.name,
+        // ISO stringgé alakítjuk, hogy biztonságosan átmenjen a JSON-en
+        startTime: record.start_time.toISOString(), 
+        duration: durationMins,
+        waterUsed: record.water_used_l || 0,
+        // 'MANUAL' -> 'manual', 'SCHEDULED' -> 'scheduled'
+        type: record.trigger_source.toLowerCase(), 
+        status: record.status
+      };
+    });
+
+    res.json(frontendHistory);
+  } catch (err) {
+    console.error('[Backend] Hiba a történet lekérésekor:', err);
+    res.status(500).json({ error: 'Belső szerverhiba' });
+  }
+});
