@@ -11,7 +11,6 @@ import type { SystemSettings, WateringZone } from "../types";
 import { toast } from "sonner";
 
 export function Settings() {
-  // Mockolt beállítások - Ezt majd később kötjük be adatbázisba, most marad memóriában
   const [settings, setSettings] = useState<SystemSettings>({
     autoWatering: false,
     moistureThreshold: 30,
@@ -26,26 +25,52 @@ export function Settings() {
   const [loading, setLoading] = useState(true);
 
   // Zónák betöltése a szerverről
-  const loadZones = async () => {
+  const loadData = async () => {
     try {
-      const res = await fetch('/api/zones');
-      if (!res.ok) throw new Error("Hálózati hiba");
-      const data = await res.json();
-      setZones(data);
+      const [zonesRes, settingsRes] = await Promise.all([
+        fetch('/api/zones'),
+        fetch('/api/settings')
+      ]);
+
+      if (!zonesRes.ok || !settingsRes.ok) throw new Error("Hálózati hiba");
+      
+      const zonesData = await zonesRes.json();
+      const settingsData = await settingsRes.json();
+      
+      setZones(zonesData);
+      setSettings(settingsData);
     } catch (error) {
-      toast.error("Nem sikerült betölteni a zónákat az adatbázisból.");
+      toast.error("Nem sikerült betölteni az adatokat az adatbázisból.");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadZones();
+    loadData();
   }, []);
 
-  const handleSettingChange = (key: keyof SystemSettings, value: any) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
-    toast.success("Helyi beállítás frissítve (még nincs perzisztálva)");
+  const handleSettingChange = async (key: keyof SystemSettings, value: any) => {
+    // 1. Optimista UI frissítés (hogy a kapcsoló azonnal átbillenjen a felhasználónak)
+    const previousSettings = { ...settings };
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+
+    try {
+      // 2. Szinkronizálás a backenddel
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value })
+      });
+
+      if (!res.ok) throw new Error();
+      toast.success("Beállítás perzisztálva!");
+    } catch (error) {
+      // 3. Rollback hiba esetén
+      setSettings(previousSettings);
+      toast.error("Hálózati hiba: Nem sikerült elmenteni az állapotot.");
+    }
   };
 
   // ==========================================
@@ -91,7 +116,7 @@ export function Settings() {
       toast.success(`A(z) ${zone.name} adatai elmentve!`);
     } catch (error) {
       toast.error("Hiba a mentés során.");
-      loadZones(); // Visszaállítjuk a szerver állapotára
+      loadData(); // Visszaállítjuk a szerver állapotára
     }
   };
 
@@ -118,22 +143,120 @@ export function Settings() {
         <p className="text-slate-600 dark:text-slate-400">Rendszer és Zóna konfiguráció</p>
       </div>
 
-      {/* Rendszer beállítások (Egyelőre statikus maradt) */}
+      {/* Rendszer beállítások */}
       <Card>
         <CardHeader>
           <CardTitle>Automatizálási paraméterek</CardTitle>
-          <CardDescription>Okos öntözés szabályozása</CardDescription>
+          <CardDescription>Okos öntözés és prediktív szabályozás</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-           <div className="flex items-center justify-between">
+          
+          {/* Talajnedvesség */}
+          <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label>Talajnedvesség alapú indítás (Későbbi funkció)</Label>
+              <Label>Reaktív Vezérlés (Talajnedvesség)</Label>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Automatikus öntözés, ha a talaj kiszárad</p>
             </div>
             <Switch
               checked={settings.autoWatering}
               onCheckedChange={(checked) => handleSettingChange("autoWatering", checked)}
             />
           </div>
+
+          {/* Progresszív felfedés: Csak akkor látszik, ha aktív */}
+          {settings.autoWatering && (
+            <div className="space-y-3 pl-4 border-l-2 border-blue-500 dark:border-blue-700">
+              <div className="flex items-center justify-between">
+                <Label>Nedvesség küszöbérték: {settings.moistureThreshold}%</Label>
+              </div>
+              <Slider
+                value={[settings.moistureThreshold]}
+                // Húzás közben csak a memóriát frissítjük (UI reszponzivitás)
+                onValueChange={(val) => setSettings({ ...settings, moistureThreshold: val[0] })}
+                // Elengedéskor küldjük a hálózati kérést
+                onValueCommit={(val) => handleSettingChange("moistureThreshold", val[0])}
+                min={0}
+                max={100}
+                step={5}
+              />
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Esőnapolás */}
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Prediktív Vezérlés (Esőnapolás)</Label>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Öntözés kihagyása várható csapadék esetén</p>
+            </div>
+            <Switch
+              checked={settings.rainDelay}
+              onCheckedChange={(checked) => handleSettingChange("rainDelay", checked)}
+            />
+          </div>
+
+          {settings.rainDelay && (
+            <div className="space-y-3 pl-4 border-l-2 border-blue-500 dark:border-blue-700">
+              <div className="flex items-center justify-between">
+                <Label>Csapadék küszöbérték: {settings.rainThreshold} mm</Label>
+              </div>
+              <Slider
+                value={[settings.rainThreshold]}
+                onValueChange={(val) => setSettings({ ...settings, rainThreshold: val[0] })}
+                onValueCommit={(val) => handleSettingChange("rainThreshold", val[0])}
+                min={0}
+                max={20}
+                step={1}
+              />
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Telemetria */}
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Telemetria (Áramlásmérő)</Label>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Vízfogyasztás mérése és becslése</p>
+            </div>
+            <Switch
+              checked={settings.flowSensorEnabled}
+              onCheckedChange={(checked) => handleSettingChange("flowSensorEnabled", checked)}
+            />
+          </div>
+
+          {settings.flowSensorEnabled && (
+            <div className="pl-4 border-l-2 border-blue-500 dark:border-blue-700">
+              <Label htmlFor="default-flow-rate">Alapértelmezett átfolyás (L/perc)</Label>
+              <Input
+                id="default-flow-rate"
+                type="number"
+                min="0.1"
+                max="50"
+                step="0.1"
+                value={settings.defaultFlowRate}
+                onChange={(e) => setSettings({ ...settings, defaultFlowRate: parseFloat(e.target.value) || 15 })}
+                // Szintén optimalizáció: Csak akkor mentünk, ha a felhasználó kikattint a mezőből
+                onBlur={(e) => handleSettingChange("defaultFlowRate", parseFloat(e.target.value) || 15)}
+                className="max-w-xs mt-2"
+              />
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Értesítések */}
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Rendszeresemények (Értesítések)</Label>
+            </div>
+            <Switch
+              checked={settings.notifications}
+              onCheckedChange={(checked) => handleSettingChange("notifications", checked)}
+            />
+          </div>
+
         </CardContent>
       </Card>
 

@@ -657,3 +657,61 @@ app.delete('/api/zones/:id', async (req, res) => {
     res.status(500).json({ error: 'Törlés sikertelen' });
   }
 });
+
+// ==========================================
+// RENDSZER BEÁLLÍTÁSOK (SETTINGS) API VÉGPONTOK
+// ==========================================
+
+// DTO Segédfüggvény: DB Entity -> React State (snake_case -> camelCase)
+const mapSettingsToFrontend = (dbSettings: any) => ({
+  autoWatering: dbSettings.auto_watering,
+  moistureThreshold: dbSettings.moisture_threshold,
+  rainDelay: dbSettings.rain_delay,
+  rainThreshold: dbSettings.rain_threshold,
+  flowSensorEnabled: dbSettings.flow_sensor_enabled,
+  defaultFlowRate: dbSettings.default_flow_rate,
+  notifications: dbSettings.notifications
+});
+
+// GET /api/settings - Beállítások lekérése (vagy inicializálása)
+app.get('/api/settings', async (req, res) => {
+  try {
+    let settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    
+    // Fallback: Ha még sosem volt elmentve, létrehozzuk a sémában definiált default értékekkel
+    if (!settings) {
+      settings = await prisma.systemSettings.create({ data: { id: 1 } });
+      console.log('[Backend] Alapértelmezett beállítások inicializálva.');
+    }
+    
+    res.json(mapSettingsToFrontend(settings));
+  } catch (err) {
+    console.error('[Backend] Hiba a beállítások lekérésekor:', err);
+    res.status(500).json({ error: 'Belső szerverhiba' });
+  }
+});
+
+// PUT /api/settings - Beállítások frissítése
+app.put('/api/settings', async (req, res) => {
+  try {
+    const data = req.body;
+    
+    const updatedSettings = await prisma.systemSettings.update({
+      where: { id: 1 },
+      data: {
+        ...(data.autoWatering !== undefined && { auto_watering: data.autoWatering }),
+        ...(data.moistureThreshold !== undefined && { moisture_threshold: data.moistureThreshold }),
+        ...(data.rainDelay !== undefined && { rain_delay: data.rainDelay }),
+        ...(data.rainThreshold !== undefined && { rain_threshold: data.rainThreshold }),
+        ...(data.flowSensorEnabled !== undefined && { flow_sensor_enabled: data.flowSensorEnabled }),
+        ...(data.defaultFlowRate !== undefined && { default_flow_rate: data.defaultFlowRate }),
+        ...(data.notifications !== undefined && { notifications: data.notifications }),
+      }
+    });
+
+    res.json(mapSettingsToFrontend(updatedSettings));
+  } catch (err) {
+    console.error('[Backend] Hiba a beállítások frissítésekor:', err);
+    res.status(500).json({ error: 'Frissítés sikertelen' });
+  }
+});

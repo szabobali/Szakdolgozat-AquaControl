@@ -61,3 +61,19 @@ status         String   // Értékek: "IN_PROGRESS", "COMPLETED", "FAILED", "INT
 
 water_used_l   Float?   // Becsült vagy mért vízhasználat literben
 }
+
+// GLOBÁLIS BEÁLLÍTÁSOK (Singleton minta)
+model SystemSettings {
+  id                  Int     @id @default(1) // Mindig 1 lesz
+  
+  auto_watering       Boolean @default(false)
+  moisture_threshold  Int     @default(30)
+  
+  rain_delay          Boolean @default(false)
+  rain_threshold      Float   @default(5.0)
+  
+  flow_sensor_enabled Boolean @default(false)
+  default_flow_rate   Float   @default(15.0)
+  
+  notifications       Boolean @default(true)
+}
