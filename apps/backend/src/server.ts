@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { connect } from 'mqtt';
 import { PrismaClient } from '@prisma/client';
+import cron from 'node-cron';
 
 const app = express();
 app.use(cors());
@@ -264,6 +265,98 @@ mqttClient.on('message', async (topic, message) => {
   }
 });
 
+cron.schedule('* * * * *', async () => {
+  try {
+    const nowStr = new Date().toLocaleString("en-US", { timeZone: "Europe/Budapest" });
+    const budapestTime = new Date(nowStr);
+    
+    const currentDay = budapestTime.getDay();
+    const currentHour = budapestTime.getHours().toString().padStart(2, '0');
+    const currentMinute = budapestTime.getMinutes().toString().padStart(2, '0');
+    const currentTimeOfDay = `${currentHour}:${currentMinute}`;
+
+    // 1. TÍPUSBIZTOS LEKÉPEZÉS (Megoldás a TS hibára)
+    // Az "as const" kulcsszóval a TS egy fix tuple-ként kezeli, nem egy sima string[]-ként.
+    const dayColumns = [
+      'day_sunday', 'day_monday', 'day_tuesday', 'day_wednesday', 
+      'day_thursday', 'day_friday', 'day_saturday'
+    ] as const;
+    
+    // Így a todayColumn típusa már nem "string", hanem a fenti 7 érték egyike lesz (Union Type).
+    const todayColumn = dayColumns[currentDay];
+
+    // Mivel a Prisma nem engedi a dinamikus kulcsokat direktben a strongly-typed objektumban,
+    // egy iteratív objektumépítést alkalmazunk, ami tiszteletben tartja a típusokat.
+    // 2. VÉDŐVONAL (Guard Clause & Type Narrowing)
+    if (!todayColumn) {
+      console.error(`[Scheduler] Kritikus hiba: Érvénytelen nap index (${currentDay}).`);
+      return;
+    }
+    // 2. Lekérdezés
+    const dueSchedules = await prisma.schedule.findMany({
+      where: {
+        is_enabled: true,
+        time_of_day: currentTimeOfDay,
+        [todayColumn]: true // Itt már nem fog dobni sem TS2464-et, sem TS2538-at!
+      }
+    });
+
+    if (dueSchedules.length > 0) {
+      console.log(`[Scheduler] ⏰ ${currentTimeOfDay} - Találtam ${dueSchedules.length} db végrehajtandó ütemezést.`);
+    }
+
+    // 3. Végrehajtás és Peremeset védelem
+    for (const schedule of dueSchedules) {
+      const zoneId = schedule.zone_id;
+      const duration = schedule.duration_mins;
+
+      // ELŐZETES ÁLLAPOTVIZSGÁLAT (Edge case védelem)
+      const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
+      
+      if (zone?.is_active) {
+        console.warn(`[Scheduler] ⚠️ Zóna ${zoneId} MÁR AKTÍV (valószínűleg kézi indítás). Az ütemezést átugorjuk az ütközés elkerülése végett.`);
+        continue; // Kilépünk az aktuális iterációból, megyünk a következőre
+      }
+
+      // Készítünk egy History rekordot
+      await prisma.history.create({
+        data: {
+          zone_id: zoneId,
+          start_time: new Date(),
+          status: 'IN_PROGRESS',
+          trigger_source: 'SCHEDULED'
+        }
+      });
+
+      // Frissítjük a Zóna állapotát
+      await prisma.zone.update({
+        where: { id: zoneId },
+        data: { is_active: true }
+      });
+
+      // Publikáljuk az MQTT parancsot
+      const topic = zone?.mqtt_topic_cmd || `garden/valves/${zoneId}/command`;
+      const payload = JSON.stringify({
+        state: 'ON',
+        duration_seconds: duration * 60
+      });
+
+      mqttClient.publish(topic, payload, { qos: 1 });
+
+      // SSE Frissítés
+      const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: true };
+      sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
+
+      console.log(`[Scheduler] 🚀 Zóna ${zoneId} automatikusan elindítva ${duration} percre.`);
+    }
+
+  } catch (error) {
+    console.error('[Scheduler] Kritikus hiba az ütemező futásakor:', error);
+  }
+}, {
+  timezone: "Europe/Budapest"
+});
+
 async function bootstrap() {
   try {
     console.log('[Bootstrap] Rendszer inicializálása...');
@@ -300,4 +393,120 @@ process.on('SIGINT', async () => {
   try { await prisma.$disconnect(); } catch (_) {}
   try { mqttClient.end(); } catch (_) {}
   process.exit(0);
+});
+
+// ==========================================
+// ÜTEMEZÉSEK (SCHEDULES) API VÉGPONTOK
+// ==========================================
+
+// Segédfüggvény: Prisma Entity -> Frontend DTO
+const mapDbScheduleToFrontend = (dbSchedule: any) => {
+  const days = [];
+  if (dbSchedule.day_sunday) days.push(0);
+  if (dbSchedule.day_monday) days.push(1);
+  if (dbSchedule.day_tuesday) days.push(2);
+  if (dbSchedule.day_wednesday) days.push(3);
+  if (dbSchedule.day_thursday) days.push(4);
+  if (dbSchedule.day_friday) days.push(5);
+  if (dbSchedule.day_saturday) days.push(6);
+
+  return {
+    id: dbSchedule.id.toString(),
+    zoneId: dbSchedule.zone_id.toString(),
+    time: dbSchedule.time_of_day,
+    duration: dbSchedule.duration_mins,
+    days: days,
+    enabled: dbSchedule.is_enabled
+  };
+};
+
+// Segédfüggvény: Frontend DTO -> Prisma Entity adatok (csak a napok)
+const mapDaysToDbColumns = (days: number[]) => {
+  return {
+    day_sunday: days.includes(0),
+    day_monday: days.includes(1),
+    day_tuesday: days.includes(2),
+    day_wednesday: days.includes(3),
+    day_thursday: days.includes(4),
+    day_friday: days.includes(5),
+    day_saturday: days.includes(6)
+  };
+};
+
+// GET /api/schedules - Összes ütemezés lekérése
+app.get('/api/schedules', async (req, res) => {
+  try {
+    const schedules = await prisma.schedule.findMany();
+    const frontendSchedules = schedules.map(mapDbScheduleToFrontend);
+    res.json(frontendSchedules);
+  } catch (err) {
+    console.error('[Backend] Hiba az ütemezések lekérésekor:', err);
+    res.status(500).json({ error: 'Belső szerverhiba' });
+  }
+});
+
+// POST /api/schedules - Új ütemezés létrehozása
+app.post('/api/schedules', async (req, res) => {
+  try {
+    const { zoneId, time, duration, days, enabled } = req.body;
+
+    const newSchedule = await prisma.schedule.create({
+      data: {
+        zone_id: parseInt(zoneId, 10),
+        time_of_day: time,
+        duration_mins: parseInt(duration, 10),
+        is_enabled: enabled ?? true,
+        ...mapDaysToDbColumns(days)
+      }
+    });
+
+    res.status(201).json(mapDbScheduleToFrontend(newSchedule));
+  } catch (err) {
+    console.error('[Backend] Hiba az ütemezés mentésekor:', err);
+    res.status(500).json({ error: 'Mentés sikertelen' });
+  }
+});
+
+// PUT /api/schedules/:id - Meglévő ütemezés frissítése (pl. engedélyezés/tiltás vagy módosítás)
+app.put('/api/schedules/:id', async (req, res) => {
+  const scheduleId = parseInt(req.params.id, 10);
+  if (isNaN(scheduleId)) return res.status(400).json({ error: 'Érvénytelen azonosító' });
+
+  try {
+    const { zoneId, time, duration, days, enabled } = req.body;
+    
+    // Csak a kapott adatokat frissítjük
+    const updateData: any = {};
+    if (zoneId !== undefined) updateData.zone_id = parseInt(zoneId, 10);
+    if (time !== undefined) updateData.time_of_day = time;
+    if (duration !== undefined) updateData.duration_mins = parseInt(duration, 10);
+    if (enabled !== undefined) updateData.is_enabled = enabled;
+    if (days !== undefined) Object.assign(updateData, mapDaysToDbColumns(days));
+
+    const updatedSchedule = await prisma.schedule.update({
+      where: { id: scheduleId },
+      data: updateData
+    });
+
+    res.json(mapDbScheduleToFrontend(updatedSchedule));
+  } catch (err) {
+    console.error(`[Backend] Hiba az ütemezés frissítésekor (ID: ${scheduleId}):`, err);
+    res.status(500).json({ error: 'Frissítés sikertelen' });
+  }
+});
+
+// DELETE /api/schedules/:id - Ütemezés törlése
+app.delete('/api/schedules/:id', async (req, res) => {
+  const scheduleId = parseInt(req.params.id, 10);
+  if (isNaN(scheduleId)) return res.status(400).json({ error: 'Érvénytelen azonosító' });
+
+  try {
+    await prisma.schedule.delete({
+      where: { id: scheduleId }
+    });
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error(`[Backend] Hiba az ütemezés törlésekor (ID: ${scheduleId}):`, err);
+    res.status(500).json({ error: 'Törlés sikertelen' });
+  }
 });

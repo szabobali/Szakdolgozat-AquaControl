@@ -7,11 +7,10 @@ import { Switch } from "../ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Plus, Trash2, Clock } from "lucide-react";
-import { storage } from "../utils/storage";
 import type { ScheduleEntry, WateringZone } from "../types";
 import { toast } from "sonner";
 
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function Schedule() {
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
@@ -19,55 +18,110 @@ export function Schedule() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduleEntry | null>(null);
 
+  const loadData = async () => {
+    try {
+      // Promise.all: Párhuzamosan indítjuk a két független hálózati kérést az I/O maximalizálása érdekében
+      const [schedulesRes, zonesRes] = await Promise.all([
+        fetch('/api/schedules'),
+        fetch('/api/zones')
+      ]);
+
+      if (!schedulesRes.ok || !zonesRes.ok) throw new Error("Hiba az adatok szinkronizálásakor");
+
+      const schedulesData = await schedulesRes.json();
+      const zonesData = await zonesRes.json();
+
+      setSchedules(schedulesData);
+      setZones(zonesData);
+    } catch (error: any) {
+      console.error("[Frontend] Betöltési hiba:", error);
+      toast.error("Nem sikerült betölteni az ütemezéseket a szerverről.");
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setSchedules(storage.getSchedules());
-    setZones(storage.getZones());
-  };
+  const handleToggleSchedule = async (id: string) => {
+    const targetSchedule = schedules.find((s) => s.id === id);
+    if (!targetSchedule) return;
 
-  const handleToggleSchedule = (id: string) => {
-    const updated = schedules.map((s) =>
-      s.id === id ? { ...s, enabled: !s.enabled } : s
-    );
-    setSchedules(updated);
-    storage.saveSchedules(updated);
-    toast.success("Schedule updated");
-  };
+    const previousSchedules = [...schedules];
+    const newStatus = !targetSchedule.enabled;
 
-  const handleDeleteSchedule = (id: string) => {
-    const updated = schedules.filter((s) => s.id !== id);
-    setSchedules(updated);
-    storage.saveSchedules(updated);
-    toast.success("Schedule deleted");
-  };
+    // 1. Állapot azonnali módosítása a memóriában
+    setSchedules(schedules.map((s) => s.id === id ? { ...s, enabled: newStatus } : s));
 
-  const handleSaveSchedule = (schedule: Partial<ScheduleEntry>) => {
-    if (editingSchedule) {
-      const updated = schedules.map((s) =>
-        s.id === editingSchedule.id ? { ...s, ...schedule } : s
-      );
-      setSchedules(updated);
-      storage.saveSchedules(updated);
-      toast.success("Schedule updated");
-    } else {
-      const newSchedule: ScheduleEntry = {
-        id: Date.now().toString(),
-        zoneId: schedule.zoneId!,
-        time: schedule.time!,
-        duration: schedule.duration!,
-        days: schedule.days!,
-        enabled: true,
-      };
-      const updated = [...schedules, newSchedule];
-      setSchedules(updated);
-      storage.saveSchedules(updated);
-      toast.success("Schedule created");
+    try {
+      // 2. Szinkronizálás a backenddel
+      const res = await fetch(`/api/schedules/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: newStatus })
+      });
+
+      if (!res.ok) throw new Error("Backend visszautasította a kérést");
+      toast.success(newStatus ? "Ütemezés bekapcsolva" : "Ütemezés kikapcsolva");
+    } catch (error) {
+      console.error("[Frontend] Toggle hiba:", error);
+      // 3. Rollback (visszagörgetés) hiba esetén
+      setSchedules(previousSchedules);
+      toast.error("Hálózati hiba: Az állapotot nem sikerült elmenteni.");
     }
-    setIsDialogOpen(false);
-    setEditingSchedule(null);
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    if (!confirm("Biztosan törölni szeretnéd ezt az ütemezést?")) return;
+
+    try {
+      const res = await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error("Törlés sikertelen");
+
+      setSchedules(schedules.filter((s) => s.id !== id));
+      toast.success("Ütemezés véglegesen törölve");
+    } catch (error) {
+      console.error("[Frontend] Törlési hiba:", error);
+      toast.error("Hiba történt a törlés során.");
+    }
+  };
+
+  const handleSaveSchedule = async (scheduleData: Partial<ScheduleEntry>) => {
+    try {
+      if (editingSchedule) {
+        // Módosítás (PUT)
+        const res = await fetch(`/api/schedules/${editingSchedule.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(scheduleData)
+        });
+
+        if (!res.ok) throw new Error("Nem sikerült módosítani");
+        const updatedRecord = await res.json();
+        
+        setSchedules(schedules.map((s) => s.id === editingSchedule.id ? updatedRecord : s));
+        toast.success("Ütemezés sikeresen módosítva");
+      } else {
+        // Létrehozás (POST)
+        const res = await fetch('/api/schedules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(scheduleData)
+        });
+
+        if (!res.ok) throw new Error("Nem sikerült létrehozni");
+        const createdRecord = await res.json();
+        
+        setSchedules([...schedules, createdRecord]);
+        toast.success("Új ütemezés elmentve az adatbázisba");
+      }
+
+      setIsDialogOpen(false);
+      setEditingSchedule(null);
+    } catch (error: any) {
+      console.error("[Frontend] Mentési hiba:", error);
+      toast.error(error.message);
+    }
   };
 
   const getZoneName = (zoneId: string) => {
@@ -194,12 +248,32 @@ function ScheduleForm({
 }) {
   const [formData, setFormData] = useState<Partial<ScheduleEntry>>(
     schedule || {
-      zoneId: zones[0]?.id || "",
+      zoneId: zones.length > 0 ? zones[0].id.toString() : "",
       time: "06:00",
-      duration: 15,
+      duration: zones.length > 0 && zones[0].duration ? zones[0].duration : 15,
       days: [1, 3, 5],
     }
   );
+
+  useEffect(() => {
+    if (!schedule && !formData.zoneId && zones.length > 0) {
+      setFormData((prev) => ({
+        ...prev,
+        zoneId: zones[0].id.toString(),
+        duration: zones[0].duration || 15, // Beemeljük a DB-s alapértelmezett időt
+      }));
+    }
+  }, [zones, schedule, formData.zoneId]);
+
+  const handleZoneChange = (newZoneId: string) => {
+    const selectedZone = zones.find((z) => z.id.toString() === newZoneId);
+    setFormData({
+      ...formData,
+      zoneId: newZoneId,
+      // Automatikusan átvesszük a DB-ben tárolt alapértelmezett időt az új zónához
+      duration: selectedZone?.duration || formData.duration,
+    });
+  };
 
   const handleDayToggle = (dayIndex: number) => {
     const days = formData.days || [];
@@ -213,7 +287,11 @@ function ScheduleForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.days || formData.days.length === 0) {
-      toast.error("Please select at least one day");
+      toast.error("Válassz ki legalább egy napot!");
+      return;
+    }
+    if (!formData.zoneId) {
+      toast.error("Kérlek, várj, amíg a zónák betöltődnek, vagy válassz egyet!");
       return;
     }
     onSave(formData);
@@ -225,14 +303,14 @@ function ScheduleForm({
         <Label>Zone</Label>
         <Select
           value={formData.zoneId}
-          onValueChange={(value) => setFormData({ ...formData, zoneId: value })}
+          onValueChange={handleZoneChange}
         >
           <SelectTrigger>
-            <SelectValue />
+            <SelectValue placeholder="Válassz zónát..."/>
           </SelectTrigger>
           <SelectContent>
             {zones.map((zone) => (
-              <SelectItem key={zone.id} value={zone.id}>
+              <SelectItem key={zone.id} value={zone.id.toString()}>
                 {zone.name}
               </SelectItem>
             ))}
@@ -257,7 +335,7 @@ function ScheduleForm({
           max="120"
           value={formData.duration}
           onChange={(e) =>
-            setFormData({ ...formData, duration: parseInt(e.target.value) })
+            setFormData({ ...formData, duration: parseInt(e.target.value) || 15 })
           }
         />
       </div>
