@@ -558,3 +558,102 @@ app.get('/api/history', async (req, res) => {
     res.status(500).json({ error: 'Belső szerverhiba' });
   }
 });
+
+// ==========================================
+// ZÓNA (ZONE) CRUD API VÉGPONTOK
+// ==========================================
+
+// POST /api/zones - Új zóna létrehozása
+app.post('/api/zones', async (req, res) => {
+  try {
+    const { name, duration, mqttTopicCmd, mqttTopicStatus } = req.body;
+    
+    // Alapértelmezett topicok generálása, ha a felhasználó nem adott meg semmit
+    const defaultId = Date.now().toString().slice(-4); // Ideiglenes azonosító a topicba
+    const cmdTopic = mqttTopicCmd || `garden/valves/${defaultId}/command`;
+    const statusTopic = mqttTopicStatus || `garden/valves/${defaultId}/status`;
+
+    const newZone = await prisma.zone.create({
+      data: {
+        name: name || 'Új Zóna',
+        default_duration: parseInt(duration, 10) || 15,
+        mqtt_topic_cmd: cmdTopic,
+        mqtt_topic_status: statusTopic,
+        is_active: false
+      }
+    });
+
+    // CACHE INVALIDÁCIÓ: Újraépítjük a memóriatérképet!
+    await buildTopicCache();
+
+    res.status(201).json({
+      id: newZone.id.toString(),
+      name: newZone.name,
+      isActive: newZone.is_active,
+      duration: newZone.default_duration,
+      mqttTopicCmd: newZone.mqtt_topic_cmd,
+      mqttTopicStatus: newZone.mqtt_topic_status
+    });
+  } catch (err) {
+    console.error('[Backend] Hiba a zóna létrehozásakor:', err);
+    res.status(500).json({ error: 'Létrehozás sikertelen' });
+  }
+});
+
+// PUT /api/zones/:id - Meglévő zóna módosítása
+app.put('/api/zones/:id', async (req, res) => {
+  const zoneId = parseInt(req.params.id, 10);
+  if (isNaN(zoneId)) return res.status(400).json({ error: 'Érvénytelen azonosító' });
+
+  try {
+    const { name, duration, mqttTopicCmd, mqttTopicStatus } = req.body;
+    
+    const updatedZone = await prisma.zone.update({
+      where: { id: zoneId },
+      data: {
+        ...(name && { name }),
+        ...(duration && { default_duration: parseInt(duration, 10) }),
+        ...(mqttTopicCmd && { mqtt_topic_cmd: mqttTopicCmd }),
+        ...(mqttTopicStatus && { mqtt_topic_status: mqttTopicStatus }),
+      }
+    });
+
+    // CACHE INVALIDÁCIÓ: Ha változott a státusz topic, a RAM-nak is tudnia kell róla!
+    await buildTopicCache();
+
+    res.json({
+      id: updatedZone.id.toString(),
+      name: updatedZone.name,
+      isActive: updatedZone.is_active,
+      duration: updatedZone.default_duration,
+      mqttTopicCmd: updatedZone.mqtt_topic_cmd,
+      mqttTopicStatus: updatedZone.mqtt_topic_status
+    });
+  } catch (err) {
+    console.error(`[Backend] Hiba a zóna frissítésekor (ID: ${zoneId}):`, err);
+    res.status(500).json({ error: 'Frissítés sikertelen' });
+  }
+});
+
+// DELETE /api/zones/:id - Zóna törlése
+app.delete('/api/zones/:id', async (req, res) => {
+  const zoneId = parseInt(req.params.id, 10);
+  if (isNaN(zoneId)) return res.status(400).json({ error: 'Érvénytelen azonosító' });
+
+  try {
+    // Figyelem: A relációs adatbázisokban (Referential Integrity) először 
+    // a kapcsolódó rekordokat (History, Schedule) kell törölni, különben a Prisma hibát dob!
+    await prisma.history.deleteMany({ where: { zone_id: zoneId } });
+    await prisma.schedule.deleteMany({ where: { zone_id: zoneId } });
+
+    await prisma.zone.delete({ where: { id: zoneId } });
+
+    // CACHE INVALIDÁCIÓ
+    await buildTopicCache();
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error(`[Backend] Hiba a zóna törlésekor (ID: ${zoneId}):`, err);
+    res.status(500).json({ error: 'Törlés sikertelen' });
+  }
+});

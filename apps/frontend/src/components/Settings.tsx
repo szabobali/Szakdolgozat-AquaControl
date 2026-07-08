@@ -1,306 +1,219 @@
 import { useState, useEffect } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
 import { Slider } from "../ui/slider";
 import { Separator } from "../ui/separator";
-import { storage } from "../utils/storage";
+import { Plus, Trash2, Save } from "lucide-react";
 import type { SystemSettings, WateringZone } from "../types";
 import { toast } from "sonner";
 
 export function Settings() {
-  const [settings, setSettings] = useState<SystemSettings>(
-    storage.getSettings(),
-  );
-  const [zones, setZones] = useState<WateringZone[]>(storage.getZones());
+  // Mockolt beállítások - Ezt majd később kötjük be adatbázisba, most marad memóriában
+  const [settings, setSettings] = useState<SystemSettings>({
+    autoWatering: false,
+    moistureThreshold: 30,
+    rainDelay: false,
+    rainThreshold: 5,
+    flowSensorEnabled: false,
+    defaultFlowRate: 15,
+    notifications: true
+  });
+  
+  const [zones, setZones] = useState<WateringZone[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Zónák betöltése a szerverről
+  const loadZones = async () => {
+    try {
+      const res = await fetch('/api/zones');
+      if (!res.ok) throw new Error("Hálózati hiba");
+      const data = await res.json();
+      setZones(data);
+    } catch (error) {
+      toast.error("Nem sikerült betölteni a zónákat az adatbázisból.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadZones();
+  }, []);
 
   const handleSettingChange = (key: keyof SystemSettings, value: any) => {
-    const updated = { ...settings, [key]: value };
-    setSettings(updated);
-    storage.saveSettings(updated);
-    toast.success("Settings saved");
+    setSettings(prev => ({ ...prev, [key]: value }));
+    toast.success("Helyi beállítás frissítve (még nincs perzisztálva)");
   };
 
-  const handleZoneUpdate = (zoneId: string, updates: Partial<WateringZone>) => {
-    const updated = zones.map((z) =>
-      z.id === zoneId ? { ...z, ...updates } : z,
-    );
-    setZones(updated);
-    storage.saveZones(updated);
-    toast.success("Zone updated");
+  // ==========================================
+  // ZÓNA CRUD MŰVELETEK
+  // ==========================================
+
+  // Új zóna (Create)
+  const handleAddZone = async () => {
+    try {
+      const res = await fetch('/api/zones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: "Új Zóna", duration: 15 })
+      });
+      if (!res.ok) throw new Error();
+      const newZone = await res.json();
+      setZones([...zones, newZone]);
+      toast.success("Új zóna létrehozva az adatbázisban");
+    } catch (error) {
+      toast.error("Hiba a zóna létrehozásakor");
+    }
   };
+
+  // Helyi állapot frissítése gépelés közben (nem küldjük rögtön a szerverre)
+  const handleZoneLocalChange = (zoneId: string, field: keyof WateringZone, value: any) => {
+    setZones(zones.map(z => z.id.toString() === zoneId ? { ...z, [field]: value } : z));
+  };
+
+  // Mentés a szerverre (Update)
+  const handleSaveZone = async (zone: WateringZone) => {
+    try {
+      const res = await fetch(`/api/zones/${zone.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: zone.name,
+          duration: zone.duration,
+          mqttTopicCmd: zone.mqttTopicCmd,
+          mqttTopicStatus: zone.mqttTopicStatus
+        })
+      });
+      if (!res.ok) throw new Error();
+      toast.success(`A(z) ${zone.name} adatai elmentve!`);
+    } catch (error) {
+      toast.error("Hiba a mentés során.");
+      loadZones(); // Visszaállítjuk a szerver állapotára
+    }
+  };
+
+  // Törlés (Delete)
+  const handleDeleteZone = async (zoneId: string) => {
+    if (!confirm("Biztosan törölni szeretnéd ezt a zónát? Minden történeti és ütemezési adat elvész!")) return;
+    
+    try {
+      const res = await fetch(`/api/zones/${zoneId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      setZones(zones.filter(z => z.id.toString() !== zoneId));
+      toast.success("Zóna véglegesen törölve");
+    } catch (error) {
+      toast.error("Hiba a törlés során.");
+    }
+  };
+
+  if (loading) return <div className="p-8 text-center">Beállítások szinkronizálása...</div>;
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          Settings
-        </h2>
-        <p className="text-slate-600 dark:text-slate-400">
-          Configure system preferences
-        </p>
+        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Beállítások</h2>
+        <p className="text-slate-600 dark:text-slate-400">Rendszer és Zóna konfiguráció</p>
       </div>
 
-      {/* System Settings */}
+      {/* Rendszer beállítások (Egyelőre statikus maradt) */}
       <Card>
         <CardHeader>
-          <CardTitle>System Settings</CardTitle>
-          <CardDescription>
-            Configure automatic watering behavior
-          </CardDescription>
+          <CardTitle>Automatizálási paraméterek</CardTitle>
+          <CardDescription>Okos öntözés szabályozása</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex items-center justify-between">
+           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label>Auto Watering</Label>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Automatically water zones when soil moisture is low
-              </p>
+              <Label>Talajnedvesség alapú indítás (Későbbi funkció)</Label>
             </div>
             <Switch
               checked={settings.autoWatering}
-              onCheckedChange={(checked) =>
-                handleSettingChange("autoWatering", checked)
-              }
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label>Moisture Threshold: {settings.moistureThreshold}%</Label>
-            </div>
-            <Slider
-              value={[settings.moistureThreshold]}
-              onValueChange={(value) =>
-                handleSettingChange("moistureThreshold", value[0])
-              }
-              min={0}
-              max={100}
-              step={5}
-            />
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              Water automatically when moisture drops below this level
-            </p>
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Rain Delay</Label>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Skip watering when rain is forecasted
-              </p>
-            </div>
-            <Switch
-              checked={settings.rainDelay}
-              onCheckedChange={(checked) =>
-                handleSettingChange("rainDelay", checked)
-              }
-            />
-          </div>
-
-          {settings.rainDelay && (
-            <div className="space-y-3 pl-4 border-l-2 border-slate-200 dark:border-slate-700">
-              <div className="flex items-center justify-between">
-                <Label>Rain Threshold: {settings.rainThreshold}mm</Label>
-              </div>
-              <Slider
-                value={[settings.rainThreshold]}
-                onValueChange={(value) =>
-                  handleSettingChange("rainThreshold", value[0])
-                }
-                min={0}
-                max={20}
-                step={1}
-              />
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Skip watering when forecasted rain exceeds this amount
-              </p>
-            </div>
-          )}
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Flow Sensor Enabled</Label>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Enable flow sensor for water usage tracking
-              </p>
-            </div>
-            <Switch
-              checked={settings.flowSensorEnabled}
-              onCheckedChange={(checked) =>
-                handleSettingChange("flowSensorEnabled", checked)
-              }
-            />
-          </div>
-
-          {settings.flowSensorEnabled && (
-            <div className="pl-4 border-l-2 border-slate-200 dark:border-slate-700">
-              <Label htmlFor="default-flow-rate">
-                Default Flow Rate (L/min)
-              </Label>
-              <Input
-                id="default-flow-rate"
-                type="number"
-                min="0.1"
-                max="20"
-                step="0.1"
-                value={settings.defaultFlowRate}
-                onChange={(e) =>
-                  handleSettingChange(
-                    "defaultFlowRate",
-                    parseFloat(e.target.value),
-                  )
-                }
-                className="max-w-xs mt-2"
-              />
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">
-                Used for zones without calibrated flow sensors
-              </p>
-            </div>
-          )}
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Notifications</Label>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Receive notifications about watering activities
-              </p>
-            </div>
-            <Switch
-              checked={settings.notifications}
-              onCheckedChange={(checked) =>
-                handleSettingChange("notifications", checked)
-              }
+              onCheckedChange={(checked) => handleSettingChange("autoWatering", checked)}
             />
           </div>
         </CardContent>
       </Card>
 
-      {/* Zone Settings */}
+      {/* ZÓNA KONFIGURÁCIÓ (Itt van a módosítás magja) */}
       <Card>
-        <CardHeader>
-          <CardTitle>Zone Configuration</CardTitle>
-          <CardDescription>
-            Customize settings for each watering zone
-          </CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Zóna Konfiguráció és Hardver Illesztés</CardTitle>
+            <CardDescription>Szelepek MQTT topicjainak beállítása</CardDescription>
+          </div>
+          <Button onClick={handleAddZone} size="sm" className="flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Új Zóna
+          </Button>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           {zones.map((zone) => (
-            <div
-              key={zone.id}
-              className="border border-slate-200 dark:border-slate-700 rounded-lg p-4"
-            >
-              <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-4">
-                {zone.name}
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor={`zone-${zone.id}-name`}>Zone Name</Label>
-                  <Input
-                    id={`zone-${zone.id}-name`}
-                    value={zone.name}
-                    onChange={(e) =>
-                      handleZoneUpdate(zone.id, { name: e.target.value })
-                    }
-                  />
+            <div key={zone.id} className="border border-slate-200 dark:border-slate-700 rounded-lg p-5 bg-slate-50 dark:bg-slate-800/50">
+              <div className="flex items-center justify-between mb-4 border-b border-slate-200 dark:border-slate-700 pb-3">
+                <h3 className="font-semibold text-lg text-slate-900 dark:text-slate-100">{zone.name}</h3>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => handleSaveZone(zone)}>
+                    <Save className="w-4 h-4 mr-2" /> Mentés
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => handleDeleteZone(zone.id.toString())}>
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
-                <div>
-                  <Label htmlFor={`zone-${zone.id}-duration`}>
-                    Default Duration (minutes)
-                  </Label>
-                  <Input
-                    id={`zone-${zone.id}-duration`}
-                    type="number"
-                    min="1"
-                    max="120"
-                    value={zone.duration}
-                    onChange={(e) =>
-                      handleZoneUpdate(zone.id, {
-                        duration: parseInt(e.target.value),
-                      })
-                    }
-                  />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Alap adatok */}
+                <div className="space-y-4">
+                  <div>
+                    <Label>Zóna Megnevezése</Label>
+                    <Input
+                      value={zone.name}
+                      onChange={(e) => handleZoneLocalChange(zone.id.toString(), "name", e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>Alapértelmezett Időtartam (perc)</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={zone.duration}
+                      onChange={(e) => handleZoneLocalChange(zone.id.toString(), "duration", parseInt(e.target.value) || 15)}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <Label htmlFor={`zone-${zone.id}-flow`}>
-                    Flow Rate (L/min)
-                  </Label>
+
+                {/* Hardver Integráció (MQTT) */}
+                <div className="space-y-4 bg-slate-100 dark:bg-slate-900 p-4 rounded-md">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-blue-600 dark:text-blue-400 font-bold">MQTT Parancs Topic (CMD)</Label>
+                    <span className="text-[10px] text-slate-500 uppercase">Raspberry Pi hallgatja</span>
+                  </div>
                   <Input
-                    id={`zone-${zone.id}-flow`}
-                    type="number"
-                    min="0.1"
-                    max="20"
-                    step="0.1"
-                    value={zone.flowRate}
-                    onChange={(e) =>
-                      handleZoneUpdate(zone.id, {
-                        flowRate: parseFloat(e.target.value),
-                      })
-                    }
+                    className="font-mono text-sm"
+                    value={zone.mqttTopicCmd || ""}
+                    onChange={(e) => handleZoneLocalChange(zone.id.toString(), "mqttTopicCmd", e.target.value)}
+                  />
+
+                  <div className="flex items-center justify-between mt-4">
+                    <Label className="text-green-600 dark:text-green-400 font-bold">MQTT Státusz Topic (STATUS)</Label>
+                    <span className="text-[10px] text-slate-500 uppercase">Raspberry Pi ide ír</span>
+                  </div>
+                  <Input
+                    className="font-mono text-sm"
+                    value={zone.mqttTopicStatus || ""}
+                    onChange={(e) => handleZoneLocalChange(zone.id.toString(), "mqttTopicStatus", e.target.value)}
                   />
                 </div>
               </div>
             </div>
           ))}
-        </CardContent>
-      </Card>
-
-      {/* Arduino Connection */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Arduino Connection</CardTitle>
-          <CardDescription>
-            Configure connection to your Arduino device
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <Label htmlFor="arduino-ip">Arduino IP Address</Label>
-            <Input
-              id="arduino-ip"
-              type="text"
-              placeholder="192.168.1.100"
-              defaultValue=""
-            />
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">
-              Enter the IP address or hostname of your Arduino device
-            </p>
-          </div>
-          <div>
-            <Label htmlFor="arduino-port">Port</Label>
-            <Input
-              id="arduino-port"
-              type="number"
-              placeholder="80"
-              defaultValue="80"
-            />
-          </div>
-          <Button>Test Connection</Button>
-          <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4 mt-4">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              <strong>Note:</strong> Configure your Arduino to communicate via
-              HTTP or WebSocket. Update the connection settings in{" "}
-              <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">
-                utils/arduino.ts
-              </code>
-            </p>
-          </div>
+          {zones.length === 0 && (
+            <div className="text-center py-8 text-slate-500">
+              Nincsenek zónák az adatbázisban. Hozz létre egyet!
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
