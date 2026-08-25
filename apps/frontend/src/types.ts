@@ -1,6 +1,6 @@
 export interface WateringZone {
-  mqttTopicStatus: any;
-  mqttTopicCmd: any;
+  mqttTopicStatus?: any;
+  mqttTopicCmd?: any;
   id: string;
   name: string;
   isActive: boolean;
