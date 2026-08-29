@@ -5,9 +5,12 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node --loader ts-node/esm src/server.ts",
+    "start:dev": "node --loader ts-node/esm src/server.ts",
     "dev": "node --watch --loader ts-node/esm src/server.ts",
-    "sim": "node --watch --loader ts-node/esm src/simulator.ts"
+    "build": "tsc",
+    "start": "node dist/src/server.js",
+    "sim": "node --watch --loader ts-node/esm src/simulator.ts",
+    "sim:prod": "node dist/simulator.js"
   },
   "keywords": [],
   "author": "",

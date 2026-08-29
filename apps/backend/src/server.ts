@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { connect } from 'mqtt';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Zone, History } from '@prisma/client';
 import cron from 'node-cron';
 
 const app = express();
@@ -14,7 +14,7 @@ async function buildTopicCache() {
   });
   
   topicToZoneIdMap = {};
-  zones.forEach(z => {
+  zones.forEach((z: { id: number; mqtt_topic_status: string }) => {
     // Ha van az adatbázisban fix topic, azt használjuk. 
     // Ha nincs, generáljuk le az alapértelmezett konvenció alapján!
     const statusTopic = z.mqtt_topic_status || `garden/valves/${z.id}/status`;
@@ -38,7 +38,7 @@ app.get('/api/zones', async (req, res) => {
     console.log('[Backend] DB: Zónák lekérése...');
     const zones = await prisma.zone.findMany();
     // Map to frontend shape
-    const mapped = zones.map(z => ({
+    const mapped = zones.map((z: Zone) => ({
       id: z.id.toString(),
       name: z.name,
       isActive: z.is_active,
@@ -527,7 +527,7 @@ app.get('/api/history', async (req, res) => {
     });
 
     // DTO Leképezés: Prisma Entity -> Frontend formátum
-    const frontendHistory = historyRecords.map(record => {
+    const frontendHistory = historyRecords.map((record) => {
       // Időtartam kiszámítása percekben
       let durationMins = 0;
       if (record.end_time) {
