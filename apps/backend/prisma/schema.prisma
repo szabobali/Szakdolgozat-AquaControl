@@ -77,3 +77,15 @@ model SystemSettings {
   
   notifications       Boolean @default(true)
 }
+
+model SensorReading {
+  id                    Int      @id @default(autoincrement())
+  temperature           Float?   // Levegő hőmérséklet (C)
+  humidity              Float?   // Levegő páratartalom (%)
+  atmospheric_pressure  Float?   // Légköri nyomás (hPa)
+  soil_moisture         Float?   // Talajnedvesség (%)
+  timestamp             DateTime @default(now())
+
+  // Kompozit index a villámgyors lekérdezésekhez
+  @@index([timestamp])
+}

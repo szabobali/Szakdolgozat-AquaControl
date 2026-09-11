@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { connect } from 'mqtt';
-import { PrismaClient, Zone, History } from '@prisma/client';
+import { PrismaClient, Zone, History, SensorReading } from '@prisma/client';
 import cron from 'node-cron';
 
 const app = express();
@@ -12,7 +12,7 @@ async function buildTopicCache() {
   const zones = await prisma.zone.findMany({
     select: { id: true, mqtt_topic_status: true }
   });
-  
+
   topicToZoneIdMap = {};
   zones.forEach((z: { id: number; mqtt_topic_status: string }) => {
     // Ha van az adatbázisban fix topic, azt használjuk. 
@@ -20,13 +20,64 @@ async function buildTopicCache() {
     const statusTopic = z.mqtt_topic_status || `garden/valves/${z.id}/status`;
     topicToZoneIdMap[statusTopic] = z.id;
   });
-  
+
   // Debug log, hogy lásd, mik kerültek be a memóriába:
   console.log('[Backend] MQTT Topic Cache felépítve:', topicToZoneIdMap);
 }
 
 // Prisma
 const prisma = new PrismaClient();
+await prisma.$connect();
+// Explicit WAL mód és szinkronizációs beállítás az SD kártya kímélésére
+await prisma.$executeRawUnsafe(`PRAGMA journal_mode = WAL;`);
+await prisma.$executeRawUnsafe(`PRAGMA synchronous = NORMAL;`);
+console.log("SQLite WAL mode activated for SD card protection.");
+
+// Bulk Insert
+
+// Globális vagy osztály-szintű puffer a memóriában
+let sensorBuffer: Array<{ zone_id: number, temperature: number, soil_moisture: number }> = [];
+
+// Ezt hívja az MQTT kliensed, amikor adat érkezik:
+function handleIncomingSensorData(data: any) {
+  sensorBuffer.push(data);
+}
+
+// 20 percenkénti kiírás a lemezre
+setInterval(async () => {
+  if (sensorBuffer.length === 0) return;
+
+  const dataToWrite = [...sensorBuffer]; // Másolat készítése
+  sensorBuffer = []; // Puffer ürítése azonnal, hogy a beérkező adatok ne vesszenek el
+
+  try {
+    await prisma.sensorReading.createMany({
+      data: dataToWrite
+    });
+    console.log(`Flushed ${dataToWrite.length} sensor readings to SQLite.`);
+  } catch (error) {
+    console.error("Failed to flush sensor data:", error);
+    // Hiba esetén visszatehetjük a pufferbe az adatokat
+    sensorBuffer.push(...dataToWrite);
+  }
+}, 20 * 60 * 1000);
+
+// Data Retention
+
+// Napi egyszer lefutó takarító folyamat
+setInterval(async () => {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const deleted = await prisma.sensorReading.deleteMany({
+    where: {
+      timestamp: {
+        lt: thirtyDaysAgo
+      }
+    }
+  });
+  console.log(`Data retention routine: Deleted ${deleted.count} old records.`);
+}, 24 * 60 * 60 * 1000);
 
 // MQTT
 const mqttClient = connect('mqtt://localhost:1883');
@@ -206,10 +257,10 @@ mqttClient.on('message', async (topic, message) => {
   try {
     // O(1) sebességű keresés a memóriában
     const zoneId = topicToZoneIdMap[topic];
-    
+
     if (zoneId === undefined) {
       // Nem regisztrált topic, ignoráljuk
-      return; 
+      return;
     }
 
     const payload = message.toString();
@@ -236,13 +287,13 @@ mqttClient.on('message', async (topic, message) => {
 
     // 3. Ha leállt (bármilyen okból), lezárjuk a történetet
     const stopped = (data.event === 'STOPPED' || isCurrentlyActive === false);
-    
+
     if (stopped) {
       const hist = await prisma.history.findFirst({
         where: { zone_id: zoneId, status: 'IN_PROGRESS' },
         orderBy: { start_time: 'desc' }
       });
-      
+
       if (hist) {
         await prisma.history.update({
           where: { id: hist.id },
@@ -259,7 +310,7 @@ mqttClient.on('message', async (topic, message) => {
     // 4. Továbbküldés az SSE klienseknek
     const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: isCurrentlyActive };
     sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
-    
+
   } catch (err) {
     console.error('[Backend] MQTT message handling error:', err);
   }
@@ -269,7 +320,7 @@ cron.schedule('* * * * *', async () => {
   try {
     const nowStr = new Date().toLocaleString("en-US", { timeZone: "Europe/Budapest" });
     const budapestTime = new Date(nowStr);
-    
+
     const currentDay = budapestTime.getDay();
     const currentHour = budapestTime.getHours().toString().padStart(2, '0');
     const currentMinute = budapestTime.getMinutes().toString().padStart(2, '0');
@@ -278,10 +329,10 @@ cron.schedule('* * * * *', async () => {
     // 1. TÍPUSBIZTOS LEKÉPEZÉS (Megoldás a TS hibára)
     // Az "as const" kulcsszóval a TS egy fix tuple-ként kezeli, nem egy sima string[]-ként.
     const dayColumns = [
-      'day_sunday', 'day_monday', 'day_tuesday', 'day_wednesday', 
+      'day_sunday', 'day_monday', 'day_tuesday', 'day_wednesday',
       'day_thursday', 'day_friday', 'day_saturday'
     ] as const;
-    
+
     // Így a todayColumn típusa már nem "string", hanem a fenti 7 érték egyike lesz (Union Type).
     const todayColumn = dayColumns[currentDay];
 
@@ -312,7 +363,7 @@ cron.schedule('* * * * *', async () => {
 
       // ELŐZETES ÁLLAPOTVIZSGÁLAT (Edge case védelem)
       const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
-      
+
       if (zone?.is_active) {
         console.warn(`[Scheduler] ⚠️ Zóna ${zoneId} MÁR AKTÍV (valószínűleg kézi indítás). Az ütemezést átugorjuk az ütközés elkerülése végett.`);
         continue; // Kilépünk az aktuális iterációból, megyünk a következőre
@@ -372,7 +423,7 @@ async function bootstrap() {
     // 3. Ha minden kritikus függőség él, csak akkor nyitjuk meg a HTTP portot
     const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
     const HOST = process.env.HOST || '0.0.0.0';
-    
+
     app.listen(PORT, HOST, () => {
       console.log(`[Bootstrap] 🚀 Backend szerver sikeresen elindult a ${HOST}:${PORT} címen.`);
     });
@@ -380,7 +431,7 @@ async function bootstrap() {
   } catch (error) {
     // Ha nem tudjuk felépíteni a cache-t, leállítjuk a processzt.
     console.error('[Bootstrap] Kritikus hiba az indítás során! A folyamat leáll.', error);
-    process.exit(1); 
+    process.exit(1);
   }
 }
 
@@ -390,8 +441,8 @@ bootstrap();
 // cleanup
 process.on('SIGINT', async () => {
   console.log('[Backend] Leállítás...');
-  try { await prisma.$disconnect(); } catch (_) {}
-  try { mqttClient.end(); } catch (_) {}
+  try { await prisma.$disconnect(); } catch (_) { }
+  try { mqttClient.end(); } catch (_) { }
   process.exit(0);
 });
 
@@ -474,7 +525,7 @@ app.put('/api/schedules/:id', async (req, res) => {
 
   try {
     const { zoneId, time, duration, days, enabled } = req.body;
-    
+
     // Csak a kapott adatokat frissítjük
     const updateData: any = {};
     if (zoneId !== undefined) updateData.zone_id = parseInt(zoneId, 10);
@@ -543,11 +594,11 @@ app.get('/api/history', async (req, res) => {
         id: record.id.toString(),
         zoneName: record.zone.name,
         // ISO stringgé alakítjuk, hogy biztonságosan átmenjen a JSON-en
-        startTime: record.start_time.toISOString(), 
+        startTime: record.start_time.toISOString(),
         duration: durationMins,
         waterUsed: record.water_used_l || 0,
         // 'MANUAL' -> 'manual', 'SCHEDULED' -> 'scheduled'
-        type: record.trigger_source.toLowerCase(), 
+        type: record.trigger_source.toLowerCase(),
         status: record.status
       };
     });
@@ -567,7 +618,7 @@ app.get('/api/history', async (req, res) => {
 app.post('/api/zones', async (req, res) => {
   try {
     const { name, duration, mqttTopicCmd, mqttTopicStatus } = req.body;
-    
+
     // Alapértelmezett topicok generálása, ha a felhasználó nem adott meg semmit
     const defaultId = Date.now().toString().slice(-4); // Ideiglenes azonosító a topicba
     const cmdTopic = mqttTopicCmd || `garden/valves/${defaultId}/command`;
@@ -607,7 +658,7 @@ app.put('/api/zones/:id', async (req, res) => {
 
   try {
     const { name, duration, mqttTopicCmd, mqttTopicStatus } = req.body;
-    
+
     const updatedZone = await prisma.zone.update({
       where: { id: zoneId },
       data: {
