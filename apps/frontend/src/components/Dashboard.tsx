@@ -16,14 +16,25 @@ import { fetchWeather } from "../utils/weather";
 import type { WateringZone } from "../types";
 import { toast } from "sonner";
 
+// 1. Típusdefiníció: Csak a szükséges adatokat várjuk el
+interface SensorData {
+  temperature: number | null;
+  humidity: number | null;
+}
+
 export function Dashboard() {
   const [zones, setZones] = useState<WateringZone[]>([]);
   const [weather, setWeather] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // 2. Kezdeti állapot pontosan a típus alapján
+  const [sensorData, setSensorData] = useState<SensorData>({
+    temperature: null,
+    humidity: null,
+  });
+
   const loadData = async () => {
     try {
-      // 1. Zónák lekérése a valódi Node.js backendből
       const res = await fetch("/api/zones");
       if (res.ok) {
         const data = await res.json();
@@ -32,13 +43,22 @@ export function Dashboard() {
         throw new Error("Backend nem válaszol");
       }
 
-      // 2. Időjárás lekérése
       const weatherData = await fetchWeather();
       setWeather(weatherData);
+
+      // Hidegindítás: Szenzorok lekérése
+      const sensorRes = await fetch("/api/sensors/latest");
+      if (sensorRes.ok) {
+        const sData = await sensorRes.json();
+        setSensorData({
+          temperature: sData.temperature ?? null,
+          humidity: sData.humidity ?? null,
+        });
+      }
     } catch (error) {
       console.error("Adatszinkronizációs hiba:", error);
       toast.error(
-        "Nem sikerült betölteni a kezdeti adatokat. Ellenőrizd a backendet!",
+        "Nem sikerült betölteni a kezdeti adatokat. Ellenőrizd a backendet!"
       );
     } finally {
       setLoading(false);
@@ -47,9 +67,8 @@ export function Dashboard() {
 
   useEffect(() => {
     loadData();
-    console.log(
-      "[Frontend] SSE kapcsolat inicializálása a rendszerállapothoz...",
-    );
+    console.log("[Frontend] SSE kapcsolat inicializálása...");
+    
     const eventSource = new EventSource("/api/stream/system-status");
 
     eventSource.onopen = () => {
@@ -59,50 +78,43 @@ export function Dashboard() {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log(
-          "📩 [Frontend] SSE aszinkron állapotcsomag érkezett:",
-          data,
-        );
+        console.log("📩 [Frontend] SSE aszinkron állapotcsomag érkezett:", data);
 
-        // Ha a kapott esemény típusa zónaváltozás, leképezzük a lokális reaktív tömbre
+        // Demultiplexálás (Esemény-alapú szétválasztás)
         if (data.type === "ZONE_STATUS_CHANGE") {
           setZones((prevZones) =>
             prevZones.map((zone) =>
               zone.id === data.zoneId.toString()
                 ? { ...zone, isActive: data.isActive }
-                : zone,
-            ),
+                : zone
+            )
           );
+        } else if (data.type === "SENSOR_UPDATE") {
+          setSensorData({
+            temperature: data.data.temperature ?? null,
+            humidity: data.data.humidity ?? null,
+          });
         }
       } catch (err) {
-        console.error(
-          "[Frontend] Kritikus hiba az SSE payload parsolása közben:",
-          err,
-        );
+        console.error("[Frontend] SSE hiba:", err);
       }
     };
 
     eventSource.onerror = (err) => {
-      console.error(
-        "🔴 [Frontend] SSE adatfolyam megszakadt vagy hálózati hiba lépett fel:",
-        err,
-      );
+      console.error("🔴 [Frontend] SSE megszakadt:", err);
     };
 
     return () => {
-      console.log("[Frontend] Tisztítási mechanizmus: SSE kapcsolat lezárása");
       eventSource.close();
     };
-  }, []); // Üres függőségi tömb: csak komponens mountoláskor fut le egyszer
+  }, []); 
 
   const handleStartWatering = async (
     zoneId: string,
-    durationMinutes: number = 15,
+    durationMinutes: number = 15
   ) => {
     try {
-      console.log(
-        `[Frontend] Öntözés indítása: Zóna ${zoneId}, ${durationMinutes} perc`,
-      );
+      console.log(`[Frontend] Öntözés indítása: Zóna ${zoneId}, ${durationMinutes} perc`);
       const response = await fetch(`/api/zones/${zoneId}/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -139,84 +151,87 @@ export function Dashboard() {
     }
   };
 
-  if (loading)
+  if (loading) {
     return (
       <div className="p-8 text-center">
         Szinkronizálás a vezérlővel és az időjárás-állomásokkal...
       </div>
     );
+  }
 
   return (
     <div className="p-6 space-y-6">
-      {/* Weather Overview */}
-      {weather && weather.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Temperature
-                  </p>
-                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                    23°C
-                  </p>
-                </div>
-                <ThermometerSun className="w-8 h-8 text-orange-500" />
+      {/* Szenzor Overview - Csak a hőmérséklet és a páratartalom maradt */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Temperature
+                </p>
+                <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                  {sensorData.temperature !== null ? `${sensorData.temperature.toFixed(1)}°C` : '--'}
+                </p>
               </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Humidity
-                  </p>
-                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                    65%
-                  </p>
-                </div>
-                <Droplets className="w-8 h-8 text-blue-500" />
+              <ThermometerSun className="w-8 h-8 text-orange-500" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Humidity
+                </p>
+                <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                  {sensorData.humidity !== null ? `${sensorData.humidity.toFixed(1)}%` : '--'}
+                </p>
               </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Water Usage
-                  </p>
-                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                    12.5L
-                  </p>
-                </div>
-                <Gauge className="w-8 h-8 text-cyan-500" />
+              <Cloud className="w-8 h-8 text-sky-500" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Eredeti statikus kártyák (Water Usage, Status) */}
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Water Usage
+                </p>
+                <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                  12.5L
+                </p>
               </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Status
-                  </p>
-                  <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                    {zones.some((z) => z.isActive) ? "Active" : "Idle"}
-                  </p>
-                </div>
-                {zones.some((z) => z.isActive) ? (
-                  <Droplet className="w-8 h-8 text-blue-500" />
-                ) : (
-                  <Cloud className="w-8 h-8 text-sky-500" />
-                )}
+              <Gauge className="w-8 h-8 text-cyan-500" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Status
+                </p>
+                <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                  {zones.some((z) => z.isActive) ? "Active" : "Idle"}
+                </p>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+              {zones.some((z) => z.isActive) ? (
+                <Droplet className="w-8 h-8 text-blue-500" />
+              ) : (
+                <Cloud className="w-8 h-8 text-sky-500" />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* 5-Day Forecast Szekció */}
       {weather.length > 0 && (
@@ -245,8 +260,7 @@ export function Dashboard() {
                   </p>
                   {day.rainSum > 0 && (
                     <p className="text-xs text-blue-600 dark:text-blue-400 mt-2 flex items-center gap-1 font-medium">
-                      <Droplets className="w-3 h-3" /> {day.rainSum.toFixed(1)}{" "}
-                      mm
+                      <Droplets className="w-3 h-3" /> {day.rainSum.toFixed(1)} mm
                     </p>
                   )}
                 </div>
@@ -279,8 +293,7 @@ export function Dashboard() {
                       </h3>
                       {zone.lastWatered && (
                         <p className="text-xs text-slate-500">
-                          Last:{" "}
-                          {new Date(zone.lastWatered).toLocaleString("hu-HU")}
+                          Last: {new Date(zone.lastWatered).toLocaleString("hu-HU")}
                         </p>
                       )}
                     </div>
@@ -300,7 +313,7 @@ export function Dashboard() {
                           ? handleStopWatering(zone.id.toString())
                           : handleStartWatering(
                               zone.id.toString(),
-                              zone.duration,
+                              zone.duration
                             )
                       }
                     >

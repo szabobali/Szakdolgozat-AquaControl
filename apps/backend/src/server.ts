@@ -29,20 +29,21 @@ async function buildTopicCache() {
 const prisma = new PrismaClient();
 await prisma.$connect();
 // Explicit WAL mód és szinkronizációs beállítás az SD kártya kímélésére
-await prisma.$executeRawUnsafe(`PRAGMA journal_mode = WAL;`);
-await prisma.$executeRawUnsafe(`PRAGMA synchronous = NORMAL;`);
+await prisma.$queryRawUnsafe(`PRAGMA journal_mode = WAL;`);
+await prisma.$queryRawUnsafe(`PRAGMA synchronous = NORMAL;`);
 console.log("SQLite WAL mode activated for SD card protection.");
 
 // Bulk Insert
 
 // Globális vagy osztály-szintű puffer a memóriában
-let sensorBuffer: Array<{ 
-  zone_id: number; 
+let sensorBuffer: Array<{
   temperature: number | null; 
   soil_moisture: number | null;
   humidity: number | null;
   atmospheric_pressure: number | null;
 }> = [];
+
+let latestSensorData: any = null;
 
 // Ezt hívja az MQTT kliensed, amikor adat érkezik:
 function handleIncomingSensorData(data: any) {
@@ -271,6 +272,29 @@ mqttClient.on('message', async (topic, message) => {
   try {
     const payload = JSON.parse(message.toString());
     
+    const temp = payload.temperature !== undefined ? Number(payload.temperature) : null;
+    const moisture = payload.soil_moisture !== undefined ? Number(payload.soil_moisture) : null;
+    const hum = payload.humidity !== undefined ? Number(payload.humidity) : null;
+    const press = payload.atmospheric_pressure !== undefined ? Number(payload.atmospheric_pressure) : null;
+
+    const currentReading = { temperature: temp, soil_moisture: moisture, humidity: hum, atmospheric_pressure: press };
+    
+    // 1. Mentés a DB pufferbe
+    sensorBuffer.push(currentReading);
+
+    // 2. Mentés a RAM gyorsítótárba az oldalfrissítésekhez
+    latestSensorData = currentReading;
+
+    // 3. Valós idejű push a csatlakoztatott React klienseknek
+    const ssePayload = { type: 'SENSOR_UPDATE', data: currentReading };
+    sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
+    
+  } catch (err) {
+    console.warn(`[MQTT] Érvénytelen szenzor adat:`, message.toString());
+  }
+  return;try {
+    const payload = JSON.parse(message.toString());
+    
     // Szigorú típusellenőrzés: A 0 érvényes érték, csak az undefined/hiányzó adat lesz null!
     const zoneId = payload.zone_id !== undefined ? Number(payload.zone_id) : 1;
     const temp = payload.temperature !== undefined ? Number(payload.temperature) : null;
@@ -280,7 +304,6 @@ mqttClient.on('message', async (topic, message) => {
 
     // Hozzáadjuk a memóriapufferhez
     sensorBuffer.push({
-      zone_id: zoneId,
       temperature: temp,
       soil_moisture: moisture,
       humidity: hum,
@@ -808,4 +831,12 @@ app.put('/api/settings', async (req, res) => {
     console.error('[Backend] Hiba a beállítások frissítésekor:', err);
     res.status(500).json({ error: 'Frissítés sikertelen' });
   }
+});
+
+// ==========================================
+// SZENZOR ADAT API
+// ==========================================
+
+app.get('/api/sensors/latest', (req, res) => {
+  res.json(latestSensorData || { temperature: null, soil_moisture: null, humidity: null, pressure: null });
 });
