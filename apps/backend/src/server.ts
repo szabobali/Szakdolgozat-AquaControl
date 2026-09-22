@@ -292,28 +292,6 @@ mqttClient.on('message', async (topic, message) => {
   } catch (err) {
     console.warn(`[MQTT] Érvénytelen szenzor adat:`, message.toString());
   }
-  return;try {
-    const payload = JSON.parse(message.toString());
-    
-    // Szigorú típusellenőrzés: A 0 érvényes érték, csak az undefined/hiányzó adat lesz null!
-    const zoneId = payload.zone_id !== undefined ? Number(payload.zone_id) : 1;
-    const temp = payload.temperature !== undefined ? Number(payload.temperature) : null;
-    const moisture = payload.soil_moisture !== undefined ? Number(payload.soil_moisture) : null;
-    const hum = payload.humidity !== undefined ? Number(payload.humidity) : null;
-    const press = payload.pressure !== undefined ? Number(payload.pressure) : null;
-
-    // Hozzáadjuk a memóriapufferhez
-    sensorBuffer.push({
-      temperature: temp,
-      soil_moisture: moisture,
-      humidity: hum,
-      atmospheric_pressure: press
-    });
-    
-  } catch (err) {
-    console.warn(`[MQTT] Érvénytelen szenzor adat a ${topic} topikban:`, message.toString());
-  }
-  
   return; 
 }
 
@@ -840,3 +818,36 @@ app.put('/api/settings', async (req, res) => {
 app.get('/api/sensors/latest', (req, res) => {
   res.json(latestSensorData || { temperature: null, soil_moisture: null, humidity: null, pressure: null });
 });
+
+setInterval(async () => {
+  if (sensorBuffer.length === 0) return;
+
+  // Csak az érvényes (nem null) értékeket szűrjük ki a matematikához
+  const temps = sensorBuffer.filter(r => r.temperature !== null).map(r => r.temperature as number);
+  const hums = sensorBuffer.filter(r => r.humidity !== null).map(r => r.humidity as number);
+  const press = sensorBuffer.filter(r => r.atmospheric_pressure !== null).map(r => r.atmospheric_pressure as number);
+  const moists = sensorBuffer.filter(r => r.soil_moisture !== null).map(r => r.soil_moisture as number);
+
+  // Segédfüggvény az átlagoláshoz (ha nincs adat, null-t ad vissza)
+  const calcAvg = (arr: number[]) => arr.length > 0 ? Number((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2)) : null;
+
+  try {
+    // (pl. prisma.sensorReading.create vagy prisma.sensorData.create)
+    await prisma.sensorReading.create({
+      data: {
+        temperature: calcAvg(temps),
+        humidity: calcAvg(hums),
+        atmospheric_pressure: calcAvg(press),
+        soil_moisture: calcAvg(moists)
+      }
+    });
+    
+    console.log(`[DB] 20 perces szenzor átlag elmentve az SQLite-ba. (Feldolgozott minták: ${sensorBuffer.length})`);
+    
+    // Puffer biztonságos ürítése a következő ciklushoz
+    sensorBuffer.length = 0; 
+    
+  } catch (error) {
+    console.error('[DB] Kritikus hiba a szenzor adatok mentésekor:', error);
+  }
+}, 20 * 60 * 1000);
