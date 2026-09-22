@@ -50,25 +50,6 @@ function handleIncomingSensorData(data: any) {
   sensorBuffer.push(data);
 }
 
-// 20 percenkénti kiírás a lemezre
-setInterval(async () => {
-  if (sensorBuffer.length === 0) return;
-
-  const dataToWrite = [...sensorBuffer]; // Másolat készítése
-  sensorBuffer = []; // Puffer ürítése azonnal, hogy a beérkező adatok ne vesszenek el
-
-  try {
-    await prisma.sensorReading.createMany({
-      data: dataToWrite
-    });
-    console.log(`Flushed ${dataToWrite.length} sensor readings to SQLite.`);
-  } catch (error) {
-    console.error("Failed to flush sensor data:", error);
-    // Hiba esetén visszatehetjük a pufferbe az adatokat
-    sensorBuffer.push(...dataToWrite);
-  }
-}, 20 * 60 * 1000);
-
 // Data Retention
 
 // Napi egyszer lefutó takarító folyamat
@@ -832,7 +813,6 @@ setInterval(async () => {
   const calcAvg = (arr: number[]) => arr.length > 0 ? Number((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2)) : null;
 
   try {
-    // (pl. prisma.sensorReading.create vagy prisma.sensorData.create)
     await prisma.sensorReading.create({
       data: {
         temperature: calcAvg(temps),
