@@ -20,7 +20,7 @@ export function Schedule() {
 
   const loadData = async () => {
     try {
-      // Promise.all: Párhuzamosan indítjuk a két független hálózati kérést az I/O maximalizálása érdekében
+      //párhuzamos indítás
       const [schedulesRes, zonesRes] = await Promise.all([
         fetch('/api/schedules'),
         fetch('/api/zones')

@@ -45,7 +45,6 @@ let sensorBuffer: Array<{
 
 let latestSensorData: any = null;
 
-// Ezt hívja az MQTT kliensed, amikor adat érkezik:
 function handleIncomingSensorData(data: any) {
   sensorBuffer.push(data);
 }
@@ -831,3 +830,48 @@ setInterval(async () => {
     console.error('[DB] Kritikus hiba a szenzor adatok mentésekor:', error);
   }
 }, 20 * 60 * 1000);
+
+app.get('/api/sensors/history', async (req, res) => {
+  try {
+    const data = await prisma.sensorReading.findMany({
+      orderBy: { timestamp: 'desc' },
+      take: 504 
+    });
+    res.json(data.reverse());
+  } catch (error) {
+    res.status(500).json({ error: "Szerver hiba" });
+  }
+});
+
+// TODO: TÖRÖLNI ÉLESÍTÉS ELŐTT! Fejlesztői végpont mock adatok generálására
+app.get('/api/dev/seed-all', async (req, res) => {
+  try {
+    // Töröljük a korábbi tesztadatokat, hogy tiszta lapot kapjunk
+    await prisma.sensorReading.deleteMany();
+
+    const now = Date.now();
+    
+    // Szenzor adatok generálása (elmúlt 7 nap, 20 percenként)
+    for (let i = 504; i >= 0; i--) {
+      const mockTime = new Date(now - i * 20 * 60 * 1000);
+      
+      // Napszakhoz kötött szinuszos ingadozás szimulálása
+      const hour = mockTime.getHours();
+      const tempBase = 15 + Math.sin((hour - 6) * Math.PI / 12) * 10; 
+      
+      await prisma.sensorReading.create({
+        data: {
+          temperature: Number((tempBase + Math.random() * 2).toFixed(1)),
+          humidity: Number((40 + Math.random() * 20).toFixed(1)),
+          atmospheric_pressure: Number((1010 + Math.random() * 15).toFixed(1)),
+          soil_moisture: Number((30 + Math.random() * 30).toFixed(1)),
+          timestamp: mockTime
+        }
+      });
+    }
+
+    res.json({ message: "7 napos szenzor és öntözés mock adatbázis sikeresen feltöltve!" });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});

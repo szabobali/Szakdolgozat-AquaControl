@@ -56,3 +56,11 @@ export interface FlowSensorData {
   totalVolume: number; // total volume in liters
   timestamp: Date;
 }
+
+export interface SensorHistoryData{
+  temperature: number | null;
+  humidity: number | null;
+  atmospheric_pressure: number | null;
+  soil_moisture: number | null;
+  timestamp: Date;
+}
