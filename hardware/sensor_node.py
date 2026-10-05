@@ -25,7 +25,7 @@ try:
     aht20 = adafruit_ahtx0.AHTx0(i2c)
     bmp280 = adafruit_bmp280.Adafruit_BMP280_I2C(i2c)
     ads = ADS.ADS1115(i2c)
-    soil_chan = AnalogIn(ads, ADS.P0)
+    soil_chan = AnalogIn(ads, 0)
     
     # A tengerszinti nyomás kalibrálása (opcionális a pontos magasságméréshez)
     bmp280.sea_level_pressure = 1013.25

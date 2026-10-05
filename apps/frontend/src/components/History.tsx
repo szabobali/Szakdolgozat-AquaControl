@@ -260,13 +260,16 @@ export function History() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis 
                     dataKey="timestamp" 
-                    tickFormatter={(val) => new Date(val).toLocaleTimeString("hu-HU", { hour: '2-digit', minute: '2-digit' })}
+                    tickFormatter={(val: string | number) => new Date(val).toLocaleTimeString("hu-HU", { hour: '2-digit', minute: '2-digit' })}
                     tick={{ fontSize: 11, fill: '#64748b' }}
                   />
                   <YAxis yAxisId="left" orientation="left" tick={{ fontSize: 11, fill: '#64748b' }} />
                   <YAxis yAxisId="right" orientation="right" domain={[900, 1050]} tick={{ fontSize: 11, fill: '#64748b' }} hide={!visibleMetrics.atmospheric_pressure} />
                   <Tooltip 
-                    labelFormatter={(label) => new Date(label as string).toLocaleString("hu-HU")}
+                    labelFormatter={(label: any) => {
+  if (!label) return ""; // Biztonsági null-check, ha a Recharts véletlenül undefined-ot küldene
+  return new Date(label as string | number).toLocaleString("hu-HU");
+}}
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                   />
                   <Legend verticalAlign="top" height={36} />
