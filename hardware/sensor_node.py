@@ -5,12 +5,16 @@ import busio
 import adafruit_ahtx0
 import adafruit_bmp280
 import paho.mqtt.client as mqtt
+import adafruit_ads1x15.ads1115 as ADS
+from adafruit_ads1x15.analog_in import AnalogIn
 
 # --- Konfiguráció ---
 MQTT_BROKER = "127.0.0.1"
 MQTT_PORT = 1883
 MQTT_TOPIC = "sensors/zone1"
 READ_INTERVAL = 60
+VOLTAGE_DRY = 3.0
+VOLTAGE_WET = 1.2
 
 # --- Hardver Inicializálása ---
 try:
@@ -20,6 +24,8 @@ try:
     # Szenzor objektumok példányosítása
     aht20 = adafruit_ahtx0.AHTx0(i2c)
     bmp280 = adafruit_bmp280.Adafruit_BMP280_I2C(i2c)
+    ads = ADS.ADS1115(i2c)
+    soil_chan = AnalogIn(ads, ADS.P0)
     
     # A tengerszinti nyomás kalibrálása (opcionális a pontos magasságméréshez)
     bmp280.sea_level_pressure = 1013.25
@@ -28,6 +34,28 @@ except Exception as e:
     print(f"[KRITIKUS HIBA] Nem sikerült csatlakozni a szenzorokhoz! Ellenőrizd a kábeleket. Hiba: {e}")
     exit(1)
 
+def get_soil_moisture_percent():
+    if ads is None:
+        return None
+    
+    try:
+        # A nyers feszültség kiolvasása az A0 lábról
+        voltage = soil_chan.voltage
+        
+        # 1. Határértékek levágása (hogy ne kapjunk negatív vagy 100% feletti értéket)
+        if voltage >= VOLTAGE_DRY:
+            return 0.0
+        if voltage <= VOLTAGE_WET:
+            return 100.0
+            
+        # 2. Lineáris interpoláció (arányosítás a két végpont között)
+        moisture = 100.0 * (1 - ((voltage - VOLTAGE_WET) / (VOLTAGE_DRY - VOLTAGE_WET)))
+        
+        return round(moisture, 1)
+        
+    except Exception as e:
+        print(f"[SZENZOR HIBA] Nem sikerült olvasni a talajnedvességet: {e}")
+        return None
 # --- Üzenetküldő Logika ---
 def publish_sensor_data(client):
     try:
@@ -36,16 +64,14 @@ def publish_sensor_data(client):
         temp = aht20.temperature
         hum = aht20.relative_humidity
         press = bmp280.pressure
-
-        # 2. Mockolt adat (Amíg nincs ADC modulod a HW-390-hez)
-        soil_moisture_mock = 55.4
+        soil_moisture = get_soil_moisture_percent()
 
         payload = {
             "zone_id": 1,
             "temperature": round(temp, 2),
             "humidity": round(hum, 2),
             "atmospheric_pressure": round(press, 2),
-            "soil_moisture": soil_moisture_mock
+            "soil_moisture": soil_moisture
         }
 
         json_payload = json.dumps(payload)
