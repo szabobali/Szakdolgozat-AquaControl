@@ -24,6 +24,37 @@ async function buildTopicCache() {
   // Debug log, hogy lásd, mik kerültek be a memóriába:
   console.log('[Backend] MQTT Topic Cache felépítve:', topicToZoneIdMap);
 }
+async function getExpectedRainMmCached(): Promise<number> {
+  const CACHE_TTL_MS = 60 * 60 * 1000; // 1 óra
+  const now = Date.now();
+
+  if (now - weatherCache.lastUpdated < CACHE_TTL_MS) {
+    return weatherCache.forecastRainMm;
+  }
+
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=47.3533&longitude=18.2711&hourly=precipitation&timezone=Europe%2FBudapest&forecast_days=2`;
+    const response = await fetch(url);
+    
+    if (!response.ok) throw new Error(`HTTP hiba: ${response.status}`);
+    
+    const data = await response.json();
+  
+    const currentHour = new Date().getHours();
+    const upcomingRain = data.hourly.precipitation.slice(currentHour, currentHour + 12);
+    const totalRain = upcomingRain.reduce((sum: number, val: number) => sum + val, 0);
+    
+    weatherCache.forecastRainMm = totalRain;
+    weatherCache.lastUpdated = now;
+    
+    console.log(`[Weather] 🌤️ Friss előrejelzés lekérve az Open-Meteo-tól. Várható eső (12h): ${totalRain.toFixed(1)} mm.`);
+    return totalRain;
+
+  } catch (error) {
+    console.error("[Weather] Hiba az időjárás lekérésekor:", error);
+    return weatherCache.forecastRainMm || 0; 
+  }
+}
 
 // Prisma
 const prisma = new PrismaClient();
@@ -42,6 +73,11 @@ let sensorBuffer: Array<{
   humidity: number | null;
   atmospheric_pressure: number | null;
 }> = [];
+
+let weatherCache = {
+  forecastRainMm: 0,
+  lastUpdated: 0
+};
 
 let latestSensorData: any = null;
 
@@ -106,11 +142,9 @@ app.post('/api/command', (req, res) => {
   });
 });
 
-// POST /api/zones/:id/start - kézi indítás + history sor létrehozása
-// POST /api/zones/:zoneId/start - Öntözés indítása, DB és History mentés, majd MQTT kiküldés
 app.post('/api/zones/:zoneId/start', async (req, res) => {
   const zoneId = parseInt(req.params.zoneId, 10);
-  const { duration } = req.body; // Időtartam percekben a frontendről
+  const { duration } = req.body; 
 
   if (isNaN(zoneId)) {
     return res.status(400).json({ error: 'Érvénytelen zóna azonosító' });
@@ -119,33 +153,22 @@ app.post('/api/zones/:zoneId/start', async (req, res) => {
   try {
     console.log(`[Backend] Öntözés indítása kérés érkezett - Zóna: ${zoneId}, Időtartam: ${duration} perc`);
 
-    // 1. Lokális DB állapot frissítése (is_active = true)
+    // 1. Lokális DB állapot frissítése (optimista UI)
     await prisma.zone.update({
       where: { id: zoneId },
       data: { is_active: true }
     });
 
-    // 2. Új történeti rekord (History) beszúrása IN_PROGRESS státusszal
-    await prisma.history.create({
-      data: {
-        zone_id: zoneId,
-        start_time: new Date(),
-        status: 'IN_PROGRESS',
-        trigger_source: 'MANUAL'
-      }
-    });
-
-    // 3. MQTT parancs kiküldése a hardver/szimulátor felé
-    const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
-    const topic = zone?.mqtt_topic_cmd || `garden/valves/${zoneId}/command`;
+    // 2. MQTT parancs kiküldése (Fire and Forget a hardver felé)
+    const topic = `garden/valves/${zoneId}/command`;
     const payload = JSON.stringify({
-      state: 'ON',
-      duration_seconds: (duration || 15) * 60
+      action: 'START',
+      duration_minutes: duration || 15
     });
 
     mqttClient.publish(topic, payload, { qos: 1 });
 
-    // 4. Azonnali SSE push a frontend klienseknek az optimista állapot-szinkronizációért
+    // 3. Azonnali SSE push a frontend klienseknek az optimista állapot-szinkronizációért
     const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: true };
     sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
 
@@ -156,7 +179,7 @@ app.post('/api/zones/:zoneId/start', async (req, res) => {
   }
 });
 
-// POST /api/zones/:zoneId/stop - Öntözés leállítása, DB és History lezárás, majd MQTT kiküldés
+// POST /api/zones/:zoneId/stop - Kézi leállítás MQTT parancsként
 app.post('/api/zones/:zoneId/stop', async (req, res) => {
   const zoneId = parseInt(req.params.zoneId, 10);
 
@@ -165,40 +188,15 @@ app.post('/api/zones/:zoneId/stop', async (req, res) => {
   }
 
   try {
-    console.log(`[Backend] Öntözés leállítása kérés érkezett - Zóna: ${zoneId}`);
+    console.log(`[Backend] Öntözés kézi leállítása kérés érkezett - Zóna: ${zoneId}`);
 
-    // 1. Lokális DB állapot frissítése (is_active = false)
-    await prisma.zone.update({
-      where: { id: zoneId },
-      data: { is_active: false }
-    });
-
-    // 2. Aktív, folyamatban lévő history rekord lezárása (end_time beállítása, státusz COMPLETED)
-    const activeHistory = await prisma.history.findFirst({
-      where: { zone_id: zoneId, status: 'IN_PROGRESS' },
-      orderBy: { start_time: 'desc' }
-    });
-
-    if (activeHistory) {
-      await prisma.history.update({
-        where: { id: activeHistory.id },
-        data: {
-          end_time: new Date(),
-          status: 'COMPLETED'
-        }
-      });
-    }
-
-    // 3. MQTT leállító parancs kiküldése
-    const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
-    const topic = zone?.mqtt_topic_cmd || `garden/valves/${zoneId}/command`;
-    const payload = JSON.stringify({ state: 'OFF' });
+    // 1. MQTT leállító parancs kiküldése a hardvernek
+    const topic = `garden/valves/${zoneId}/command`;
+    const payload = JSON.stringify({ action: 'STOP' });
 
     mqttClient.publish(topic, payload, { qos: 1 });
 
-    // 4. SSE értesítés a leállításról
-    const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: false };
-    sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
+    // (A DB frissítést és a History lezárást innentől a hardver visszajelzése fogja elvégezni!)
 
     return res.status(200).json({ success: true });
   } catch (err) {
@@ -278,65 +276,49 @@ mqttClient.on('message', async (topic, message) => {
   // ==========================================
   // 2. ÁG: SZELEPEK STÁTUSZÁNAK FELDOLGOZÁSA (Eredeti logika)
   // ==========================================
-  try {
-    // O(1) sebességű keresés a memóriában
-    const zoneId = topicToZoneIdMap[topic];
-    
-    if (zoneId === undefined) {
-      // Nem regisztrált topic, ignoráljuk
-      return; 
-    }
-
-    const payload = message.toString();
-    let data: any = null;
-    try { data = JSON.parse(payload); } catch (e) { return; }
-
-    console.log(`📩 [Backend] MQTT üzenet feldolgozása (Zóna: ${zoneId}):`, data);
-
-    // 1. Állapot biztonságos kinyerése (támogatja a state: OFF és az isActive: false formátumot is)
-    let isCurrentlyActive = false;
-    if (typeof data.isActive === 'boolean') {
-      isCurrentlyActive = data.isActive;
-    } else if (data.state === 'ON') {
-      isCurrentlyActive = true;
-    } else if (data.state === 'OFF') {
-      isCurrentlyActive = false;
-    }
-
-    // 2. KÖZVETLEN HARDVER VISSZAJELZÉS ALAPJÁN FRISSÍTJÜK A DB-T
-    await prisma.zone.update({
-      where: { id: zoneId },
-      data: { is_active: isCurrentlyActive }
-    });
-
-    // 3. Ha leállt (bármilyen okból), lezárjuk a történetet
-    const stopped = (data.event === 'STOPPED' || isCurrentlyActive === false);
-    
-    if (stopped) {
-      const hist = await prisma.history.findFirst({
-        where: { zone_id: zoneId, status: 'IN_PROGRESS' },
-        orderBy: { start_time: 'desc' }
-      });
+  if (topic.startsWith('garden/valves/') && topic.endsWith('/status')) {
+    try {
+      const payload = JSON.parse(message.toString());
       
-      if (hist) {
-        await prisma.history.update({
-          where: { id: hist.id },
+      // Megnézzük, hogy befejeződött-e az öntözés
+      if (payload.action === 'FINISHED') {
+        const zoneId = payload.zone;
+        const duration = payload.actual_duration; // Ezt a Python adja meg!
+        const waterUsed = payload.water_used_liters;
+        const reason = payload.reason;
+        
+        console.log(`📩 [Backend] Szelep válasz (Zóna ${zoneId}): ZÁRVA. Tényleges idő: ${duration} perc. Ok: ${reason}`);
+
+        // 1. Visszaállítjuk a Zóna állapotát inaktívra
+        await prisma.zone.update({
+          where: { id: zoneId },
+          data: { is_active: false }
+        });
+
+        // 2. Visszaszámoljuk a kezdési időt (Start Time = Most - Időtartam)
+        const startTime = new Date(Date.now() - Math.floor(duration * 60 * 1000));
+
+        // 3. Létrehozzuk a History rekordot egyből COMPLETED státusszal
+        // Így nem maradnak árva "IN_PROGRESS" rekordok, ha a Node.js újraindulna!
+        await prisma.history.create({
           data: {
+            zone_id: zoneId,
+            start_time: startTime,
             end_time: new Date(),
+            duration: duration,
             status: 'COMPLETED',
-            water_used_l: data?.waterUsedL ?? undefined
+            trigger_source: reason === 'manual_stop' ? 'MANUAL' : 'SCHEDULED',
+            water_used_l: waterUsed
           }
         });
-        console.log(`[Backend] Öntözési történet lezárva (Zóna: ${zoneId})`);
-      }
-    }
 
-    // 4. Továbbküldés az SSE klienseknek
-    const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: isCurrentlyActive };
-    sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
-    
-  } catch (err) {
-    console.error('[Backend] MQTT message handling error:', err);
+        // 4. SSE Frissítés a frontend felé, hogy pattanjon vissza a gomb
+        const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: false };
+        sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
+      }
+    } catch (err) {
+      console.error('[Backend] Hiba a szelep státusz feldolgozásakor:', err);
+    }
   }
 });
 
@@ -350,50 +332,81 @@ cron.schedule('* * * * *', async () => {
     const currentMinute = budapestTime.getMinutes().toString().padStart(2, '0');
     const currentTimeOfDay = `${currentHour}:${currentMinute}`;
 
-    // 1. TÍPUSBIZTOS LEKÉPEZÉS (Megoldás a TS hibára)
-    // Az "as const" kulcsszóval a TS egy fix tuple-ként kezeli, nem egy sima string[]-ként.
     const dayColumns = [
       'day_sunday', 'day_monday', 'day_tuesday', 'day_wednesday', 
       'day_thursday', 'day_friday', 'day_saturday'
     ] as const;
-    
-    // Így a todayColumn típusa már nem "string", hanem a fenti 7 érték egyike lesz (Union Type).
     const todayColumn = dayColumns[currentDay];
 
-    // Mivel a Prisma nem engedi a dinamikus kulcsokat direktben a strongly-typed objektumban,
-    // egy iteratív objektumépítést alkalmazunk, ami tiszteletben tartja a típusokat.
-    // 2. VÉDŐVONAL (Guard Clause & Type Narrowing)
-    if (!todayColumn) {
-      console.error(`[Scheduler] Kritikus hiba: Érvénytelen nap index (${currentDay}).`);
-      return;
-    }
-    // 2. Lekérdezés
+    if (!todayColumn) return;
+
+    // 1. Napi ütemezések lekérése
     const dueSchedules = await prisma.schedule.findMany({
       where: {
         is_enabled: true,
         time_of_day: currentTimeOfDay,
-        [todayColumn]: true // Itt már nem fog dobni sem TS2464-et, sem TS2538-at!
+        [todayColumn]: true
       }
     });
 
-    if (dueSchedules.length > 0) {
-      console.log(`[Scheduler] ⏰ ${currentTimeOfDay} - Találtam ${dueSchedules.length} db végrehajtandó ütemezést.`);
-    }
+    if (dueSchedules.length === 0) return;
 
-    // 3. Végrehajtás és Peremeset védelem
+    // Beállítások a prediktív logikához
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+
+    // 2. Feladatok végrehajtása
     for (const schedule of dueSchedules) {
       const zoneId = schedule.zone_id;
       const duration = schedule.duration_mins;
 
-      // ELŐZETES ÁLLAPOTVIZSGÁLAT (Edge case védelem)
       const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
-      
       if (zone?.is_active) {
-        console.warn(`[Scheduler] ⚠️ Zóna ${zoneId} MÁR AKTÍV (valószínűleg kézi indítás). Az ütemezést átugorjuk az ütközés elkerülése végett.`);
-        continue; // Kilépünk az aktuális iterációból, megyünk a következőre
+        console.warn(`[Scheduler] ⚠️ Zóna ${zoneId} MÁR AKTÍV. Ütemezés átugorva.`);
+        continue;
       }
 
-      // Készítünk egy History rekordot
+      // ==========================================
+      // 3. PREDIKTÍV ÉS REAKTÍV GATEKEEPER
+      // ==========================================
+      let skipWatering = false;
+      let skipReason = "";
+
+      if (settings?.rain_delay && latestSensorData) {
+        const currentMoisture = latestSensorData.soil_moisture;
+        const currentPressure = latestSensorData.atmospheric_pressure;
+        const moistureThreshold = settings.moisture_threshold;
+
+        // A) Reaktív: Tényleges csapadék detektálása (Az esőmérőként használt HW-390 nedves)
+        if (currentMoisture !== null && currentMoisture > moistureThreshold) {
+          skipWatering = true;
+          skipReason = `Talajnedvesség magas (${currentMoisture}% > ${moistureThreshold}%) - Eső áztatta a szenzort.`;
+        }
+        
+        const RAIN_PRESSURE_THRESHOLD = 1005; 
+        if (!skipWatering && currentPressure !== null && currentPressure < RAIN_PRESSURE_THRESHOLD) {
+          skipWatering = true;
+          skipReason = `Alacsony légnyomás (${currentPressure} hPa) - Eső/vihar valószínűsíthető.`;
+        }
+
+        // C) Prediktív API (Open-Meteo Cache-elt hívás)
+        if (!skipWatering) {
+          const forecastRainMm = await getExpectedRainMmCached();
+          if (forecastRainMm >= settings.rain_threshold) {
+             skipWatering = true;
+             skipReason = `Meteorológiai riasztás: ${forecastRainMm.toFixed(1)} mm eső várható a következő 12 órában.`;
+          }
+        }
+      }
+
+      // Döntés kiértékelése
+      if (skipWatering) {
+        console.log(`[Scheduler] 🚫 Zóna ${zoneId} időzített öntözése KIHAGYVA. Ok: ${skipReason}`);
+        continue; // Megszakítjuk a ciklust, a parancs nem megy ki
+      }
+
+      // ==========================================
+      // 4. ÖNTÖZÉS INDÍTÁSA (Ha zöld utat kapott)
+      // ==========================================
       await prisma.history.create({
         data: {
           zone_id: zoneId,
@@ -403,28 +416,20 @@ cron.schedule('* * * * *', async () => {
         }
       });
 
-      // Frissítjük a Zóna állapotát
       await prisma.zone.update({
         where: { id: zoneId },
         data: { is_active: true }
       });
 
-      // Publikáljuk az MQTT parancsot
       const topic = zone?.mqtt_topic_cmd || `garden/valves/${zoneId}/command`;
-      const payload = JSON.stringify({
-        state: 'ON',
-        duration_seconds: duration * 60
-      });
-
+      const payload = JSON.stringify({ action: 'START', duration_minutes: duration });
       mqttClient.publish(topic, payload, { qos: 1 });
 
-      // SSE Frissítés
       const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: true };
       sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
 
       console.log(`[Scheduler] 🚀 Zóna ${zoneId} automatikusan elindítva ${duration} percre.`);
     }
-
   } catch (error) {
     console.error('[Scheduler] Kritikus hiba az ütemező futásakor:', error);
   }
@@ -847,7 +852,7 @@ app.get('/api/sensors/history', async (req, res) => {
 app.get('/api/dev/seed-all', async (req, res) => {
   try {
     // Töröljük a korábbi tesztadatokat, hogy tiszta lapot kapjunk
-    await prisma.sensorReading.deleteMany();
+    await prisma.sensorReading.deleteMany();  
 
     const now = Date.now();
     
