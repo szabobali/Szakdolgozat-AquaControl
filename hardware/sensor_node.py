@@ -7,6 +7,7 @@ import adafruit_bmp280
 import paho.mqtt.client as mqtt
 import adafruit_ads1x15.ads1115 as ADS
 from adafruit_ads1x15.analog_in import AnalogIn
+from gpiozero import DigitalInputDevice
 
 # --- Konfiguráció ---
 MQTT_BROKER = "127.0.0.1"
@@ -15,6 +16,23 @@ MQTT_TOPIC = "sensors/zone1"
 READ_INTERVAL = 60
 VOLTAGE_DRY = 3.0
 VOLTAGE_WET = 1.2
+FLOW_PIN = 17
+pulse_count = 0
+last_publish_time = time.time()
+
+try:
+    flow_sensor = DigitalInputDevice(FLOW_PIN, pull_up=True)
+    print("[INIT] Átfolyásmérő megszakítások aktívak.")
+except Exception as e:
+    print(f"[HIBA] Átfolyásmérő inicializálása sikertelen: {e}")
+    flow_sensor = None
+
+def flow_pulse_callback():
+    global pulse_count
+    pulse_count += 1
+
+if flow_sensor:
+    flow_sensor.when_activated = flow_pulse_callback
 
 # --- Hardver Inicializálása ---
 try:
@@ -58,9 +76,21 @@ def get_soil_moisture_percent():
         return None
 # --- Üzenetküldő Logika ---
 def publish_sensor_data(client):
+    global pulse_count, last_publish_time
     try:
-        # 1. Valós adatok kiolvasása
-        # A hőmérséklethez az AHT20-at használjuk, mert általában pontosabb a környezeti levegőre
+        current_pulses = pulse_count
+        pulse_count = 0
+        
+        current_time = time.time()
+        time_elapsed = current_time - last_publish_time
+        last_publish_time = current_time
+
+        volume_liters = current_pulses / 450.0
+        if time_elapsed > 0:
+            flow_rate_l_min = (volume_liters / time_elapsed) * 60.0
+        else:
+            flow_rate_l_min = 0.0
+
         temp = aht20.temperature
         hum = aht20.relative_humidity
         press = bmp280.pressure
@@ -71,20 +101,20 @@ def publish_sensor_data(client):
             "temperature": round(temp, 2),
             "humidity": round(hum, 2),
             "atmospheric_pressure": round(press, 2),
-            "soil_moisture": soil_moisture
+            "soil_moisture": soil_moisture,
+            "flow_rate": round(flow_rate_l_min, 2), # Frontend
+            "volume_added": round(volume_liters, 4) # Water Used
         }
 
         json_payload = json.dumps(payload)
         result = client.publish(MQTT_TOPIC, json_payload, qos=1)
         
         if result.rc == mqtt.MQTT_ERR_SUCCESS:
-            print(f"[{time.strftime('%H:%M:%S')}] MQTT OK: {json_payload}")
+            print(f"[{time.strftime('%H:%M:%S')}] MQTT OK: Áramlás: {flow_rate_l_min:.2f} L/m")
         else:
             print(f"[HIBA] MQTT publikálás sikertelen. Kód: {result.rc}")
 
     except Exception as e:
-        # Védelem: Ha futás közben kihúzódik a kábel, a program ne álljon le, 
-        # csak dobjon hibát, és próbálkozzon újra a következő ciklusban.
         print(f"[HIBA] Szenzor olvasási hiba: {e}")
 
 # --- Fő Ciklus ---
@@ -101,6 +131,7 @@ if __name__ == "__main__":
     try:
         while True:
             publish_sensor_data(client)
+
             time.sleep(READ_INTERVAL)
     except KeyboardInterrupt:
         print("\nKézi leállítás.")

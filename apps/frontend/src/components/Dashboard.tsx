@@ -16,10 +16,10 @@ import { fetchWeather } from "../utils/weather";
 import type { WateringZone } from "../types";
 import { toast } from "sonner";
 
-// 1. Típusdefiníció: Csak a szükséges adatokat várjuk el
 interface SensorData {
   temperature: number | null;
   humidity: number | null;
+  flowRate: number | null;
 }
 
 export function Dashboard() {
@@ -31,6 +31,7 @@ export function Dashboard() {
   const [sensorData, setSensorData] = useState<SensorData>({
     temperature: null,
     humidity: null,
+    flowRate: null
   });
 
   const loadData = async () => {
@@ -53,6 +54,7 @@ export function Dashboard() {
         setSensorData({
           temperature: sData.temperature ?? null,
           humidity: sData.humidity ?? null,
+          flowRate: sData.flow_rate ?? null,
         });
       }
     } catch (error) {
@@ -93,6 +95,7 @@ export function Dashboard() {
           setSensorData({
             temperature: data.data.temperature ?? null,
             humidity: data.data.humidity ?? null,
+            flowRate: data.data.flow_rate ?? null,
           });
         }
       } catch (err) {
@@ -195,16 +198,15 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Eredeti statikus kártyák (Water Usage, Status) */}
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Water Usage
+                  Current Flow Rate
                 </p>
                 <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                  12.5L
+                  {sensorData.flowRate !== null ? `${sensorData.flowRate.toFixed(1)} L/min` : '0.0 L/min'}
                 </p>
               </div>
               <Gauge className="w-8 h-8 text-cyan-500" />

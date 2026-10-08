@@ -81,6 +81,8 @@ let weatherCache = {
 
 let latestSensorData: any = null;
 
+let currentSessionWaterLiters = 0;
+
 function handleIncomingSensorData(data: any) {
   sensorBuffer.push(data);
 }
@@ -255,8 +257,12 @@ mqttClient.on('message', async (topic, message) => {
     const hum = payload.humidity !== undefined ? Number(payload.humidity) : null;
     const press = payload.atmospheric_pressure !== undefined ? Number(payload.atmospheric_pressure) : null;
 
-    const currentReading = { temperature: temp, soil_moisture: moisture, humidity: hum, atmospheric_pressure: press };
+    const currentReading = { temperature: temp, soil_moisture: moisture, humidity: hum, atmospheric_pressure: press, flow_rate: payload.flow_rate ?? null};
     
+    if (payload.volume_added) {
+      currentSessionWaterLiters += Number(payload.volume_added);
+    }
+
     // 1. Mentés a DB pufferbe
     sensorBuffer.push(currentReading);
 
@@ -280,26 +286,22 @@ mqttClient.on('message', async (topic, message) => {
     try {
       const payload = JSON.parse(message.toString());
       
-      // Megnézzük, hogy befejeződött-e az öntözés
       if (payload.action === 'FINISHED') {
         const zoneId = payload.zone;
-        const duration = payload.actual_duration; // Ezt a Python adja meg!
-        const waterUsed = payload.water_used_liters;
+        const duration = payload.actual_duration;
+        const waterUsed = currentSessionWaterLiters;
         const reason = payload.reason;
+
+        currentSessionWaterLiters = 0;
         
         console.log(`📩 [Backend] Szelep válasz (Zóna ${zoneId}): ZÁRVA. Tényleges idő: ${duration} perc. Ok: ${reason}`);
 
-        // 1. Visszaállítjuk a Zóna állapotát inaktívra
         await prisma.zone.update({
           where: { id: zoneId },
           data: { is_active: false }
         });
 
-        // 2. Visszaszámoljuk a kezdési időt (Start Time = Most - Időtartam)
         const startTime = new Date(Date.now() - Math.floor(duration * 60 * 1000));
-
-        // 3. Létrehozzuk a History rekordot egyből COMPLETED státusszal
-        // Így nem maradnak árva "IN_PROGRESS" rekordok, ha a Node.js újraindulna!
         await prisma.history.create({
           data: {
             zone_id: zoneId,
@@ -308,7 +310,7 @@ mqttClient.on('message', async (topic, message) => {
             duration: duration,
             status: 'COMPLETED',
             trigger_source: reason === 'manual_stop' ? 'MANUAL' : 'SCHEDULED',
-            water_used_l: waterUsed
+            water_used_l: Number(waterUsed.toFixed(2))
           }
         });
 

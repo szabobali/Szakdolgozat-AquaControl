@@ -108,12 +108,28 @@ export function History() {
 
   // --- Statisztikai számítások ---
   const groupedHistory = groupByDate(history);
-  const totalWaterUsed = history.reduce((sum, h) => sum + (h.waterUsed || 0), 0);
-  
-  const weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfWeek = new Date(startOfToday);
+  const day = startOfWeek.getDay();
+  const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1); // Magyar naptár (Hétfő az első)
+  startOfWeek.setDate(diff);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // Napi bontás
+  const todayWaterUsed = history
+    .filter((h) => h.startTime >= startOfToday)
+    .reduce((sum, h) => sum + (h.waterUsed || 0), 0);
+
+  // Heti bontás
   const weekWaterUsed = history
-    .filter((h) => h.startTime > weekAgo)
+    .filter((h) => h.startTime >= startOfWeek)
+    .reduce((sum, h) => sum + (h.waterUsed || 0), 0);
+
+  // Havi bontás
+  const monthWaterUsed = history
+    .filter((h) => h.startTime >= startOfMonth)
     .reduce((sum, h) => sum + (h.waterUsed || 0), 0);
 
   // --- Grafikon adatszűrés ---
@@ -158,33 +174,33 @@ export function History() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Total Sessions</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Összes Öntözés</p>
               <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100 mt-1">
-                {history.length}
+                {history.length} alkalom
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Total Water Time</p>
-              <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100 mt-1">
-                {history.reduce((sum, h) => sum + h.duration, 0)} min
+              <p className="text-sm text-slate-600 dark:text-slate-400">Vízfogyasztás (Ma)</p>
+              <p className="text-3xl font-semibold text-blue-600 dark:text-blue-500 mt-1">
+                {todayWaterUsed.toFixed(1)} L
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Total Water Used</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Vízfogyasztás (Ezen a héten)</p>
               <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100 mt-1">
-                {totalWaterUsed.toFixed(1)}L
+                {weekWaterUsed.toFixed(1)} L
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">This Week</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Vízfogyasztás (Ebben a hónapban)</p>
               <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100 mt-1">
-                {weekWaterUsed.toFixed(1)}L
+                {monthWaterUsed.toFixed(1)} L
               </p>
             </CardContent>
           </Card>
@@ -240,10 +256,6 @@ export function History() {
               className={`cursor-pointer transition-all ${visibleMetrics.atmospheric_pressure ? 'bg-purple-500' : 'bg-slate-300 dark:bg-slate-700'}`}
               onClick={() => toggleMetric('atmospheric_pressure')}
             >Légnyomás</Badge>
-            <Badge 
-              className={`cursor-pointer transition-all ${visibleMetrics.water_used ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-700'}`}
-              onClick={() => toggleMetric('water_used')}
-            >Vízfogyasztás (L)</Badge>
           </div>
         </CardHeader>
 
@@ -273,8 +285,7 @@ export function History() {
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                   />
                   <Legend verticalAlign="top" height={36} />
-                  
-                  {visibleMetrics.water_used && <Bar yAxisId="left" name="Elhasznált Víz (L)" dataKey="water_used" fill="#2563eb" barSize={20} />}
+
                   {visibleMetrics.temperature && <Line yAxisId="left" type="monotone" name="Hőmérséklet (°C)" dataKey="temperature" stroke="#f97316" strokeWidth={2} dot={false} />}
                   {visibleMetrics.humidity && <Line yAxisId="left" type="monotone" name="Pára (%)" dataKey="humidity" stroke="#0ea5e9" strokeWidth={2} dot={false} />}
                   {visibleMetrics.soil_moisture && <Line yAxisId="left" type="monotone" name="Talajnedvesség (%)" dataKey="soil_moisture" stroke="#10b981" strokeWidth={2} dot={false} />}
