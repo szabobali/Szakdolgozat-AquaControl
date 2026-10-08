@@ -285,31 +285,34 @@ mqttClient.on('message', async (topic, message) => {
     try {
       const payload = JSON.parse(message.toString());
       
+      // Megnézzük, hogy befejeződött-e az öntözés
       if (payload.action === 'FINISHED') {
         const zoneId = payload.zone;
-        const duration = payload.actual_duration;
-        const waterUsed = currentSessionWaterLiters;
+        const duration = payload.actual_duration; // Ezt a Python adja meg (percekben)
+        const waterUsed = payload.water_used_liters;
         const reason = payload.reason;
-
-        currentSessionWaterLiters = 0;
         
         console.log(`📩 [Backend] Szelep válasz (Zóna ${zoneId}): ZÁRVA. Tényleges idő: ${duration} perc. Ok: ${reason}`);
 
+        // 1. Visszaállítjuk a Zóna állapotát inaktívra
         await prisma.zone.update({
           where: { id: zoneId },
           data: { is_active: false }
         });
 
+        // 2. Visszaszámoljuk a kezdési időt (Start Time = Most - Időtartam)
         const startTime = new Date(Date.now() - Math.floor(duration * 60 * 1000));
+
+        // 3. Létrehozzuk a History rekordot egyből COMPLETED státusszal
         await prisma.history.create({
           data: {
             zone_id: zoneId,
             start_time: startTime,
             end_time: new Date(),
-            duration: duration,
+            // A 'duration' SORA INNEN KIKERÜLT, mert a Prisma sémában nincs ilyen mező!
             status: 'COMPLETED',
             trigger_source: reason === 'manual_stop' ? 'MANUAL' : 'SCHEDULED',
-            water_used_l: Number(waterUsed.toFixed(2))
+            water_used_l: waterUsed
           }
         });
 

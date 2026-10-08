@@ -12,7 +12,7 @@ except Exception as e:
     exit(1)
 
 # --- KONFIGURÁCIÓ ---
-MQTT_BROKER = "localhost"  
+MQTT_BROKER = "127.0.0.1"  
 ZONE_ID = 1 
 COMMAND_TOPIC = f"garden/valves/{ZONE_ID}/command"
 STATUS_TOPIC = f"garden/valves/{ZONE_ID}/status"

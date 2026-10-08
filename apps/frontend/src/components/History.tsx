@@ -15,7 +15,6 @@ import { toast } from "sonner";
 import {
   ComposedChart,
   Line,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
