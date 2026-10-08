@@ -1,7 +1,15 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Clock, Droplets, Gauge, TrendingUp, ChevronLeft, ChevronRight, Activity } from "lucide-react";
+import {
+  Clock,
+  Droplets,
+  Gauge,
+  TrendingUp,
+  ChevronLeft,
+  ChevronRight,
+  Activity,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { toast } from "sonner";
 import {
@@ -13,7 +21,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ResponsiveContainer
+  ResponsiveContainer,
 } from "recharts";
 import type { WateringHistory } from "../types";
 
@@ -37,24 +45,25 @@ export function History() {
     humidity: true,
     soil_moisture: true,
     atmospheric_pressure: false,
-    water_used: true
+    water_used: true,
   });
 
   const loadData = async () => {
     try {
       const [historyRes, sensorRes] = await Promise.all([
-        fetch('/api/history'),
-        fetch('/api/sensors/history')
+        fetch("/api/history"),
+        fetch("/api/sensors/history"),
       ]);
 
-      if (!historyRes.ok || !sensorRes.ok) throw new Error("Szerver hiba az adatok betöltésekor");
-      
+      if (!historyRes.ok || !sensorRes.ok)
+        throw new Error("Szerver hiba az adatok betöltésekor");
+
       const historyData = await historyRes.json();
       const sensorData = await sensorRes.json();
-      
+
       const parsedHistory = historyData.map((item: any) => ({
         ...item,
-        startTime: new Date(item.startTime) 
+        startTime: new Date(item.startTime),
       }));
 
       setHistory(parsedHistory);
@@ -110,7 +119,11 @@ export function History() {
   const groupedHistory = groupByDate(history);
 
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
   const startOfWeek = new Date(startOfToday);
   const day = startOfWeek.getDay();
   const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1); // Magyar naptár (Hétfő az első)
@@ -137,36 +150,42 @@ export function History() {
   targetDate.setDate(targetDate.getDate() - dayOffset);
   const targetDateString = targetDate.toLocaleDateString("hu-HU");
 
-  const filteredSensors = sensorHistory.filter(reading => 
-    new Date(reading.timestamp).toLocaleDateString("hu-HU") === targetDateString
+  const filteredSensors = sensorHistory.filter(
+    (reading) =>
+      new Date(reading.timestamp).toLocaleDateString("hu-HU") ===
+      targetDateString,
   );
 
-  const chartData = filteredSensors.map(sensor => {
+  const chartData = filteredSensors.map((sensor) => {
     const sensorTime = new Date(sensor.timestamp).getTime();
-    const wateringEvent = history.find(h => {
+    const wateringEvent = history.find((h) => {
       const hTime = h.startTime.getTime();
-      return hTime >= sensorTime && hTime < (sensorTime + 20 * 60 * 1000);
+      return hTime >= sensorTime && hTime < sensorTime + 20 * 60 * 1000;
     });
 
     return {
       ...sensor,
-      water_used: wateringEvent ? wateringEvent.waterUsed : 0
+      water_used: wateringEvent ? wateringEvent.waterUsed : 0,
     };
   });
 
   const toggleMetric = (key: keyof typeof visibleMetrics) => {
-    setVisibleMetrics(prev => ({ ...prev, [key]: !prev[key] }));
+    setVisibleMetrics((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   if (loading) {
-    return <div className="p-8 text-center text-slate-500">Adatok szinkronizálása...</div>;
+    return <div className="p-8 text-center text-slate-500">Sync...</div>;
   }
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">History & Trends</h2>
-        <p className="text-slate-600 dark:text-slate-400">Interaktív adatelemzés és napló</p>
+        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+          History & Trends
+        </h2>
+        <p className="text-slate-600 dark:text-slate-400">
+          Data analysis and trends
+        </p>
       </div>
 
       {/* 1. Szekció: Statisztikai kártyák */}
@@ -174,15 +193,19 @@ export function History() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Összes Öntözés</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                All irrigation events
+              </p>
               <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100 mt-1">
-                {history.length} alkalom
+                {history.length} watering events
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Vízfogyasztás (Ma)</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Water used (Today)
+              </p>
               <p className="text-3xl font-semibold text-blue-600 dark:text-blue-500 mt-1">
                 {todayWaterUsed.toFixed(1)} L
               </p>
@@ -190,7 +213,9 @@ export function History() {
           </Card>
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Vízfogyasztás (Ezen a héten)</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Water used (This week)
+              </p>
               <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100 mt-1">
                 {weekWaterUsed.toFixed(1)} L
               </p>
@@ -198,7 +223,9 @@ export function History() {
           </Card>
           <Card>
             <CardContent className="pt-6 text-center">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Vízfogyasztás (Ebben a hónapban)</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Water used (This month)
+              </p>
               <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100 mt-1">
                 {monthWaterUsed.toFixed(1)} L
               </p>
@@ -213,25 +240,29 @@ export function History() {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <CardTitle className="flex items-center gap-2">
               <Activity className="w-5 h-5 text-blue-500" />
-              Napi Analitika
+              Daily Analytics
             </CardTitle>
 
             <div className="flex items-center gap-4 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => setDayOffset(prev => Math.min(prev + 1, 6))}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setDayOffset((prev) => Math.min(prev + 1, 6))}
                 disabled={dayOffset === 6}
               >
                 <ChevronLeft className="w-4 h-4" />
               </Button>
               <span className="text-sm font-medium w-24 text-center">
-                {dayOffset === 0 ? "Ma" : dayOffset === 1 ? "Tegnap" : targetDateString}
+                {dayOffset === 0
+                  ? "Today"
+                  : dayOffset === 1
+                    ? "Yesterday"
+                    : targetDateString}
               </span>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => setDayOffset(prev => Math.max(prev - 1, 0))}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setDayOffset((prev) => Math.max(prev - 1, 0))}
                 disabled={dayOffset === 0}
               >
                 <ChevronRight className="w-4 h-4" />
@@ -240,22 +271,30 @@ export function History() {
           </div>
 
           <div className="flex flex-wrap gap-2 pt-4">
-            <Badge 
-              className={`cursor-pointer transition-all ${visibleMetrics.temperature ? 'bg-orange-500' : 'bg-slate-300 dark:bg-slate-700'}`}
-              onClick={() => toggleMetric('temperature')}
-            >Hőmérséklet</Badge>
-            <Badge 
-              className={`cursor-pointer transition-all ${visibleMetrics.humidity ? 'bg-sky-500' : 'bg-slate-300 dark:bg-slate-700'}`}
-              onClick={() => toggleMetric('humidity')}
-            >Páratartalom</Badge>
-            <Badge 
-              className={`cursor-pointer transition-all ${visibleMetrics.soil_moisture ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'}`}
-              onClick={() => toggleMetric('soil_moisture')}
-            >Talajnedvesség</Badge>
-            <Badge 
-              className={`cursor-pointer transition-all ${visibleMetrics.atmospheric_pressure ? 'bg-purple-500' : 'bg-slate-300 dark:bg-slate-700'}`}
-              onClick={() => toggleMetric('atmospheric_pressure')}
-            >Légnyomás</Badge>
+            <Badge
+              className={`cursor-pointer transition-all ${visibleMetrics.temperature ? "bg-orange-500" : "bg-slate-300 dark:bg-slate-700"}`}
+              onClick={() => toggleMetric("temperature")}
+            >
+              Temperature
+            </Badge>
+            <Badge
+              className={`cursor-pointer transition-all ${visibleMetrics.humidity ? "bg-sky-500" : "bg-slate-300 dark:bg-slate-700"}`}
+              onClick={() => toggleMetric("humidity")}
+            >
+              Humidity
+            </Badge>
+            <Badge
+              className={`cursor-pointer transition-all ${visibleMetrics.soil_moisture ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+              onClick={() => toggleMetric("soil_moisture")}
+            >
+              Soil Moisture
+            </Badge>
+            <Badge
+              className={`cursor-pointer transition-all ${visibleMetrics.atmospheric_pressure ? "bg-purple-500" : "bg-slate-300 dark:bg-slate-700"}`}
+              onClick={() => toggleMetric("atmospheric_pressure")}
+            >
+              Atmospheric Pressure
+            </Badge>
           </div>
         </CardHeader>
 
@@ -263,33 +302,101 @@ export function History() {
           {chartData.length === 0 ? (
             <div className="h-[400px] w-full mt-4 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-lg text-slate-500">
               <TrendingUp className="w-8 h-8 mb-2 opacity-50" />
-              <p>Erre a napra nincsenek rögzített adatok.</p>
+              <p>There is no data available for this period.</p>
             </div>
           ) : (
             <div className="h-[400px] w-full mt-6">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData} margin={{ top: 5, right: 0, bottom: 5, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                  <XAxis 
-                    dataKey="timestamp" 
-                    tickFormatter={(val: string | number) => new Date(val).toLocaleTimeString("hu-HU", { hour: '2-digit', minute: '2-digit' })}
-                    tick={{ fontSize: 11, fill: '#64748b' }}
+                <ComposedChart
+                  data={chartData}
+                  margin={{ top: 5, right: 0, bottom: 5, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#e2e8f0"
+                    vertical={false}
                   />
-                  <YAxis yAxisId="left" orientation="left" tick={{ fontSize: 11, fill: '#64748b' }} />
-                  <YAxis yAxisId="right" orientation="right" domain={[900, 1050]} tick={{ fontSize: 11, fill: '#64748b' }} hide={!visibleMetrics.atmospheric_pressure} />
-                  <Tooltip 
+                  <XAxis
+                    dataKey="timestamp"
+                    tickFormatter={(val: string | number) =>
+                      new Date(val).toLocaleTimeString("hu-HU", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    }
+                    tick={{ fontSize: 11, fill: "#64748b" }}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    orientation="left"
+                    tick={{ fontSize: 11, fill: "#64748b" }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    domain={[900, 1050]}
+                    tick={{ fontSize: 11, fill: "#64748b" }}
+                    hide={!visibleMetrics.atmospheric_pressure}
+                  />
+                  <Tooltip
                     labelFormatter={(label: any) => {
-  if (!label) return ""; // Biztonsági null-check, ha a Recharts véletlenül undefined-ot küldene
-  return new Date(label as string | number).toLocaleString("hu-HU");
-}}
-                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                      if (!label) return ""; // Biztonsági null-check, ha a Recharts véletlenül undefined-ot küldene
+                      return new Date(label as string | number).toLocaleString(
+                        "hu-HU",
+                      );
+                    }}
+                    contentStyle={{
+                      borderRadius: "8px",
+                      border: "none",
+                      boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                    }}
                   />
                   <Legend verticalAlign="top" height={36} />
 
-                  {visibleMetrics.temperature && <Line yAxisId="left" type="monotone" name="Hőmérséklet (°C)" dataKey="temperature" stroke="#f97316" strokeWidth={2} dot={false} />}
-                  {visibleMetrics.humidity && <Line yAxisId="left" type="monotone" name="Pára (%)" dataKey="humidity" stroke="#0ea5e9" strokeWidth={2} dot={false} />}
-                  {visibleMetrics.soil_moisture && <Line yAxisId="left" type="monotone" name="Talajnedvesség (%)" dataKey="soil_moisture" stroke="#10b981" strokeWidth={2} dot={false} />}
-                  {visibleMetrics.atmospheric_pressure && <Line yAxisId="right" type="monotone" name="Légnyomás (hPa)" dataKey="atmospheric_pressure" stroke="#a855f7" strokeWidth={2} dot={false} />}
+                  {visibleMetrics.temperature && (
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      name="Temperature (°C)"
+                      dataKey="temperature"
+                      stroke="#f97316"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  )}
+                  {visibleMetrics.humidity && (
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      name="Humidity (%)"
+                      dataKey="humidity"
+                      stroke="#0ea5e9"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  )}
+                  {visibleMetrics.soil_moisture && (
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      name="Soil Moisture (%)"
+                      dataKey="soil_moisture"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  )}
+                  {visibleMetrics.atmospheric_pressure && (
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      name="Atmospheric Pressure (hPa)"
+                      dataKey="atmospheric_pressure"
+                      stroke="#a855f7"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  )}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -312,7 +419,9 @@ export function History() {
             <div className="space-y-6">
               {Object.entries(groupedHistory).map(([date, entries]) => (
                 <div key={date}>
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{date}</h3>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">
+                    {date}
+                  </h3>
                   <div className="space-y-2">
                     {entries.map((entry) => (
                       <div

@@ -22,7 +22,6 @@ current_timer = None
 start_time = 0
 
 def close_valve(client, reason="timeout"):
-    """Univerzális elzáró és statisztika-küldő függvény."""
     global current_timer, start_time
     
     valve.off()
@@ -37,12 +36,10 @@ def close_valve(client, reason="timeout"):
         
     print(f"[ZÓNA {ZONE_ID}] ZÁRVA. Ok: {reason}. Tényleges idő: {actual_duration} perc.")
     
-    # Mivel a topic már tartalmazza a zónát, a JSON-ben opcionális, de robusztusabb benne hagyni
     payload = {
         "action": "FINISHED",
         "zone": ZONE_ID,
         "actual_duration": actual_duration,
-        "water_used_liters": 0, # TODO: Áramlásmérő integráció
         "reason": reason
     }
     client.publish(STATUS_TOPIC, json.dumps(payload))

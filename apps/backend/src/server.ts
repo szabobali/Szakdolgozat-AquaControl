@@ -155,13 +155,13 @@ app.post('/api/zones/:zoneId/start', async (req, res) => {
   try {
     console.log(`[Backend] Öntözés indítása kérés érkezett - Zóna: ${zoneId}, Időtartam: ${duration} perc`);
 
-    // 1. Lokális DB állapot frissítése (optimista UI)
+    // Local DB update
     await prisma.zone.update({
       where: { id: zoneId },
       data: { is_active: true }
     });
 
-    // 2. MQTT parancs kiküldése (Fire and Forget a hardver felé)
+    // MQTT
     const topic = `garden/valves/${zoneId}/command`;
     const payload = JSON.stringify({
       action: 'START',
@@ -170,7 +170,7 @@ app.post('/api/zones/:zoneId/start', async (req, res) => {
 
     mqttClient.publish(topic, payload, { qos: 1 });
 
-    // 3. Azonnali SSE push a frontend klienseknek az optimista állapot-szinkronizációért
+    // SSE Push
     const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: true };
     sseClients.forEach(client => client.write(`data: ${JSON.stringify(ssePayload)}\n\n`));
 
@@ -224,7 +224,6 @@ app.get('/api/stream/system-status', (req, res) => {
 // MQTT connection lifecycle
 mqttClient.on('connect', () => {
   console.log('[Backend] MQTT kliens csatlakozott a brokerhez.');
-  // subscribe a status topicokra (szimulátor által használt topic)
   mqttClient.subscribe('garden/valves/+/status', (err) => {
     if (err) console.error('[Backend] MQTT subscribe hiba:', err);
     else console.log('[Backend] Feliratkozva: garden/valves/+/status');

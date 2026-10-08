@@ -31,7 +31,7 @@ export function Dashboard() {
   const [sensorData, setSensorData] = useState<SensorData>({
     temperature: null,
     humidity: null,
-    flowRate: null
+    flowRate: null,
   });
 
   const loadData = async () => {
@@ -60,7 +60,7 @@ export function Dashboard() {
     } catch (error) {
       console.error("Adatszinkronizációs hiba:", error);
       toast.error(
-        "Nem sikerült betölteni a kezdeti adatokat. Ellenőrizd a backendet!"
+        "Nem sikerült betölteni a kezdeti adatokat. Ellenőrizd a backendet!",
       );
     } finally {
       setLoading(false);
@@ -70,7 +70,7 @@ export function Dashboard() {
   useEffect(() => {
     loadData();
     console.log("[Frontend] SSE kapcsolat inicializálása...");
-    
+
     const eventSource = new EventSource("/api/stream/system-status");
 
     eventSource.onopen = () => {
@@ -80,7 +80,10 @@ export function Dashboard() {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log("📩 [Frontend] SSE aszinkron állapotcsomag érkezett:", data);
+        console.log(
+          "📩 [Frontend] SSE aszinkron állapotcsomag érkezett:",
+          data,
+        );
 
         // Demultiplexálás (Esemény-alapú szétválasztás)
         if (data.type === "ZONE_STATUS_CHANGE") {
@@ -88,8 +91,8 @@ export function Dashboard() {
             prevZones.map((zone) =>
               zone.id === data.zoneId.toString()
                 ? { ...zone, isActive: data.isActive }
-                : zone
-            )
+                : zone,
+            ),
           );
         } else if (data.type === "SENSOR_UPDATE") {
           setSensorData({
@@ -110,14 +113,16 @@ export function Dashboard() {
     return () => {
       eventSource.close();
     };
-  }, []); 
+  }, []);
 
   const handleStartWatering = async (
     zoneId: string,
-    durationMinutes: number = 15
+    durationMinutes: number = 15,
   ) => {
     try {
-      console.log(`[Frontend] Öntözés indítása: Zóna ${zoneId}, ${durationMinutes} perc`);
+      console.log(
+        `[Frontend] Öntözés indítása: Zóna ${zoneId}, ${durationMinutes} perc`,
+      );
       const response = await fetch(`/api/zones/${zoneId}/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -157,7 +162,7 @@ export function Dashboard() {
   if (loading) {
     return (
       <div className="p-8 text-center">
-        Szinkronizálás a vezérlővel és az időjárás-állomásokkal...
+        Syncing data with backend... Please wait.
       </div>
     );
   }
@@ -174,7 +179,9 @@ export function Dashboard() {
                   Temperature
                 </p>
                 <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                  {sensorData.temperature !== null ? `${sensorData.temperature.toFixed(1)}°C` : '--'}
+                  {sensorData.temperature !== null
+                    ? `${sensorData.temperature.toFixed(1)}°C`
+                    : "--"}
                 </p>
               </div>
               <ThermometerSun className="w-8 h-8 text-orange-500" />
@@ -190,7 +197,9 @@ export function Dashboard() {
                   Humidity
                 </p>
                 <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                  {sensorData.humidity !== null ? `${sensorData.humidity.toFixed(1)}%` : '--'}
+                  {sensorData.humidity !== null
+                    ? `${sensorData.humidity.toFixed(1)}%`
+                    : "--"}
                 </p>
               </div>
               <Cloud className="w-8 h-8 text-sky-500" />
@@ -206,7 +215,9 @@ export function Dashboard() {
                   Current Flow Rate
                 </p>
                 <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-                  {sensorData.flowRate !== null ? `${sensorData.flowRate.toFixed(1)} L/min` : '0.0 L/min'}
+                  {sensorData.flowRate !== null
+                    ? `${sensorData.flowRate.toFixed(1)} L/min`
+                    : "0.0 L/min"}
                 </p>
               </div>
               <Gauge className="w-8 h-8 text-cyan-500" />
@@ -262,7 +273,8 @@ export function Dashboard() {
                   </p>
                   {day.rainSum > 0 && (
                     <p className="text-xs text-blue-600 dark:text-blue-400 mt-2 flex items-center gap-1 font-medium">
-                      <Droplets className="w-3 h-3" /> {day.rainSum.toFixed(1)} mm
+                      <Droplets className="w-3 h-3" /> {day.rainSum.toFixed(1)}{" "}
+                      mm
                     </p>
                   )}
                 </div>
@@ -295,7 +307,8 @@ export function Dashboard() {
                       </h3>
                       {zone.lastWatered && (
                         <p className="text-xs text-slate-500">
-                          Last: {new Date(zone.lastWatered).toLocaleString("hu-HU")}
+                          Last:{" "}
+                          {new Date(zone.lastWatered).toLocaleString("hu-HU")}
                         </p>
                       )}
                     </div>
@@ -315,7 +328,7 @@ export function Dashboard() {
                           ? handleStopWatering(zone.id.toString())
                           : handleStartWatering(
                               zone.id.toString(),
-                              zone.duration
+                              zone.duration,
                             )
                       }
                     >
@@ -350,7 +363,8 @@ export function Dashboard() {
             ))}
             {zones.length === 0 && (
               <div className="text-center py-6 text-slate-500">
-                No zones loaded. Húzz fel zónákat az adatbázisban!
+                No watering zones configured yet. Please add a new zone in the
+                settings.
               </div>
             )}
           </div>

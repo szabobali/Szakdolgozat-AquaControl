@@ -4,8 +4,20 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { Plus, Trash2, Clock } from "lucide-react";
 import type { ScheduleEntry, WateringZone } from "../types";
 import { toast } from "sonner";
@@ -16,17 +28,20 @@ export function Schedule() {
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
   const [zones, setZones] = useState<WateringZone[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingSchedule, setEditingSchedule] = useState<ScheduleEntry | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<ScheduleEntry | null>(
+    null,
+  );
 
   const loadData = async () => {
     try {
       //párhuzamos indítás
       const [schedulesRes, zonesRes] = await Promise.all([
-        fetch('/api/schedules'),
-        fetch('/api/zones')
+        fetch("/api/schedules"),
+        fetch("/api/zones"),
       ]);
 
-      if (!schedulesRes.ok || !zonesRes.ok) throw new Error("Hiba az adatok szinkronizálásakor");
+      if (!schedulesRes.ok || !zonesRes.ok)
+        throw new Error("Hiba az adatok szinkronizálásakor");
 
       const schedulesData = await schedulesRes.json();
       const zonesData = await zonesRes.json();
@@ -51,18 +66,22 @@ export function Schedule() {
     const newStatus = !targetSchedule.enabled;
 
     // 1. Állapot azonnali módosítása a memóriában
-    setSchedules(schedules.map((s) => s.id === id ? { ...s, enabled: newStatus } : s));
+    setSchedules(
+      schedules.map((s) => (s.id === id ? { ...s, enabled: newStatus } : s)),
+    );
 
     try {
       // 2. Szinkronizálás a backenddel
       const res = await fetch(`/api/schedules/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: newStatus })
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: newStatus }),
       });
 
       if (!res.ok) throw new Error("Backend visszautasította a kérést");
-      toast.success(newStatus ? "Ütemezés bekapcsolva" : "Ütemezés kikapcsolva");
+      toast.success(
+        newStatus ? "Ütemezés bekapcsolva" : "Ütemezés kikapcsolva",
+      );
     } catch (error) {
       console.error("[Frontend] Toggle hiba:", error);
       // 3. Rollback (visszagörgetés) hiba esetén
@@ -75,7 +94,7 @@ export function Schedule() {
     if (!confirm("Biztosan törölni szeretnéd ezt az ütemezést?")) return;
 
     try {
-      const res = await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/schedules/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Törlés sikertelen");
 
       setSchedules(schedules.filter((s) => s.id !== id));
@@ -91,27 +110,31 @@ export function Schedule() {
       if (editingSchedule) {
         // Módosítás (PUT)
         const res = await fetch(`/api/schedules/${editingSchedule.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(scheduleData)
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(scheduleData),
         });
 
         if (!res.ok) throw new Error("Nem sikerült módosítani");
         const updatedRecord = await res.json();
-        
-        setSchedules(schedules.map((s) => s.id === editingSchedule.id ? updatedRecord : s));
+
+        setSchedules(
+          schedules.map((s) =>
+            s.id === editingSchedule.id ? updatedRecord : s,
+          ),
+        );
         toast.success("Ütemezés sikeresen módosítva");
       } else {
         // Létrehozás (POST)
-        const res = await fetch('/api/schedules', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(scheduleData)
+        const res = await fetch("/api/schedules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(scheduleData),
         });
 
         if (!res.ok) throw new Error("Nem sikerült létrehozni");
         const createdRecord = await res.json();
-        
+
         setSchedules([...schedules, createdRecord]);
         toast.success("Új ütemezés elmentve az adatbázisba");
       }
@@ -132,8 +155,12 @@ export function Schedule() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Watering Schedule</h2>
-          <p className="text-slate-600 dark:text-slate-400">Manage automatic watering schedules</p>
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+            Watering Schedule
+          </h2>
+          <p className="text-slate-600 dark:text-slate-400">
+            Manage automatic watering schedules
+          </p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
@@ -206,7 +233,9 @@ export function Schedule() {
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={schedule.enabled}
-                        onCheckedChange={() => handleToggleSchedule(schedule.id)}
+                        onCheckedChange={() =>
+                          handleToggleSchedule(schedule.id)
+                        }
                       />
                       <Button
                         variant="ghost"
@@ -252,7 +281,7 @@ function ScheduleForm({
       time: "06:00",
       duration: zones.length > 0 && zones[0].duration ? zones[0].duration : 15,
       days: [1, 3, 5],
-    }
+    },
   );
 
   useEffect(() => {
@@ -291,7 +320,9 @@ function ScheduleForm({
       return;
     }
     if (!formData.zoneId) {
-      toast.error("Kérlek, várj, amíg a zónák betöltődnek, vagy válassz egyet!");
+      toast.error(
+        "Kérlek, várj, amíg a zónák betöltődnek, vagy válassz egyet!",
+      );
       return;
     }
     onSave(formData);
@@ -301,12 +332,9 @@ function ScheduleForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <Label>Zone</Label>
-        <Select
-          value={formData.zoneId}
-          onValueChange={handleZoneChange}
-        >
+        <Select value={formData.zoneId} onValueChange={handleZoneChange}>
           <SelectTrigger>
-            <SelectValue placeholder="Válassz zónát..."/>
+            <SelectValue placeholder="Choose a zone..." />
           </SelectTrigger>
           <SelectContent>
             {zones.map((zone) => (
@@ -335,7 +363,10 @@ function ScheduleForm({
           max="120"
           value={formData.duration}
           onChange={(e) =>
-            setFormData({ ...formData, duration: parseInt(e.target.value) || 15 })
+            setFormData({
+              ...formData,
+              duration: parseInt(e.target.value) || 15,
+            })
           }
         />
       </div>

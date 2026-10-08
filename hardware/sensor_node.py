@@ -34,18 +34,13 @@ def flow_pulse_callback():
 if flow_sensor:
     flow_sensor.when_activated = flow_pulse_callback
 
-# --- Hardver Inicializálása ---
+# --- Hardverek Inicializálása ---
 try:
-    # I2C busz megnyitása
     i2c = busio.I2C(board.SCL, board.SDA)
-    
-    # Szenzor objektumok példányosítása
     aht20 = adafruit_ahtx0.AHTx0(i2c)
     bmp280 = adafruit_bmp280.Adafruit_BMP280_I2C(i2c)
     ads = ADS.ADS1115(i2c)
     soil_chan = AnalogIn(ads, 0)
-    
-    # A tengerszinti nyomás kalibrálása (opcionális a pontos magasságméréshez)
     bmp280.sea_level_pressure = 1013.25
     print("[HARDVER] I2C Szenzorok sikeresen inicializálva.")
 except Exception as e:
