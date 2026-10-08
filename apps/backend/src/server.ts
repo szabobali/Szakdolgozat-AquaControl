@@ -411,14 +411,6 @@ cron.schedule('* * * * *', async () => {
       // ==========================================
       // 4. ÖNTÖZÉS INDÍTÁSA (Ha zöld utat kapott)
       // ==========================================
-      await prisma.history.create({
-        data: {
-          zone_id: zoneId,
-          start_time: new Date(),
-          status: 'IN_PROGRESS',
-          trigger_source: 'SCHEDULED'
-        }
-      });
 
       await prisma.zone.update({
         where: { id: zoneId },
