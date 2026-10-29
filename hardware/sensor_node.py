@@ -14,8 +14,8 @@ MQTT_BROKER = "127.0.0.1"
 MQTT_PORT = 1883
 MQTT_TOPIC = "sensors/zone1"
 READ_INTERVAL = 60
-VOLTAGE_DRY = 3.0
-VOLTAGE_WET = 1.2
+VOLTAGE_DRY = 2.720
+VOLTAGE_WET = 0.970
 FLOW_PIN = 17
 pulse_count = 0
 last_publish_time = time.time()
@@ -54,7 +54,6 @@ def get_soil_moisture_percent():
     try:
         # A nyers feszültség kiolvasása az A0 lábról
         voltage = soil_chan.voltage
-        
         # 1. Határértékek levágása (hogy ne kapjunk negatív vagy 100% feletti értéket)
         if voltage >= VOLTAGE_DRY:
             return 0.0
