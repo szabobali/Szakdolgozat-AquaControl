@@ -162,6 +162,7 @@ app.post('/api/zones/:zoneId/start', async (req, res) => {
     });
 
     // MQTT
+    currentSessionWaterLiters = 0;
     const topic = `garden/valves/${zoneId}/command`;
     const payload = JSON.stringify({
       action: 'START',
@@ -289,7 +290,8 @@ mqttClient.on('message', async (topic, message) => {
       if (payload.action === 'FINISHED') {
         const zoneId = payload.zone;
         const duration = payload.actual_duration; // Ezt a Python adja meg (percekben)
-        const waterUsed = payload.water_used_liters;
+        const waterUsed = currentSessionWaterLiters; 
+        currentSessionWaterLiters = 0;
         const reason = payload.reason;
         
         console.log(`📩 [Backend] Szelep válasz (Zóna ${zoneId}): ZÁRVA. Tényleges idő: ${duration} perc. Ok: ${reason}`);
@@ -419,6 +421,7 @@ cron.schedule('* * * * *', async () => {
 
       const topic = zone?.mqtt_topic_cmd || `garden/valves/${zoneId}/command`;
       const payload = JSON.stringify({ action: 'START', duration_minutes: duration });
+      currentSessionWaterLiters = 0;
       mqttClient.publish(topic, payload, { qos: 1 });
 
       const ssePayload = { type: 'ZONE_STATUS_CHANGE', zoneId, isActive: true };
