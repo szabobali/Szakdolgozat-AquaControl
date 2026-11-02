@@ -799,8 +799,27 @@ app.put('/api/settings', async (req, res) => {
 // SZENZOR ADAT API
 // ==========================================
 
-app.get('/api/sensors/latest', (req, res) => {
-  res.json(latestSensorData || { temperature: null, soil_moisture: null, humidity: null, pressure: null });
+app.get('/api/sensors/latest', async (req, res) => {
+  if (latestSensorData) {
+    return res.json(latestSensorData);
+  }
+  
+  // Hidegindítás: ha a memória még üres, kérjük le az adatbázisból az utolsót
+  try {
+    const lastRecord = await prisma.sensorReading.findFirst({
+      orderBy: { timestamp: 'desc' }
+    });
+    
+    if (lastRecord) {
+      return res.json(lastRecord);
+    }
+  } catch (err) {
+    console.error("[Backend] Hiba a legutolsó szenzoradat lekérésekor:", err);
+  }
+
+  // Ha az adatbázis is teljesen üres lenne
+  res.json({ temperature: null, soil_moisture: null, humidity: null, pressure: null, flow_rate: null });
+
 });
 
 setInterval(async () => {
@@ -877,5 +896,15 @@ app.get('/api/dev/seed-all', async (req, res) => {
     res.json({ message: "7 napos szenzor és öntözés mock adatbázis sikeresen feltöltve!" });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+app.get('/api/weather', async (req, res) => {
+  try {
+    // Ez a függvény kezeli a 12 órás előrejelzést és a cache-elést is
+    const expectedRainMm = await getExpectedRainMmCached();
+    res.json({ expectedRainMm });
+  } catch (err) {
+    console.error('[Backend] Hiba az időjárás lekérésekor a frontend felé:', err);
+    res.status(500).json({ error: 'Időjárás adat nem elérhető' });
   }
 });
